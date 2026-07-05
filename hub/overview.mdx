@@ -1,0 +1,109 @@
+---
+title: "Harbor Hub: Store, Share, and Analyze Eval Jobs"
+sidebarTitle: "Overview"
+description: "Harbor Hub stores evaluation jobs, datasets, and tasks. Browse job results, compare agents, analyze costs and token usage, and share runs with your team."
+---
+
+[Harbor Hub](https://hub.harborframework.com) is the central place to store, share, and inspect your evaluation jobs, datasets, and tasks. When you upload a job, Hub gives you a comprehensive overview page where you can examine costs, token consumption, trial success rates, and performance across many dimensions — all from a browser or directly from the CLI.
+
+All Hub viewer commands share the same entry point: `harbor hub`.
+
+## Listing jobs
+
+Use `harbor hub job list` to print all jobs visible to your account on Hub.
+
+```bash
+harbor hub job list
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--scope my \| shared \| all` | Filter by visibility scope. Defaults to `my` (jobs you own). |
+| `--search TEXT` | Return only jobs whose names contain the matching substring. |
+| `--agent NAME ...` | Filter by agent name. Accepts multiple values (e.g. `--agent codex claude-code`). |
+| `--provider NAME ...` | Filter by model provider. Accepts multiple values. |
+| `--model NAME ...` | Filter by model name. Accepts multiple values. |
+
+## Job overview
+
+Use `harbor hub job show JOB_ID` to print a summary similar to the one on the Hub website.
+
+```bash
+harbor hub job show JOB_ID
+```
+
+The overview shows:
+
+- Number of trials
+- Number of errors
+- Number of retries
+- Average return across metrics
+- Cost (USD)
+- Token usage
+
+Pass multiple IDs to compare several jobs at once: `harbor hub job show JOB_ID_1 JOB_ID_2`.
+
+## Per-task breakdown
+
+Use `harbor hub job tasks JOB_ID` to see how each individual task performed within a job.
+
+```bash
+harbor hub job tasks JOB_ID
+```
+
+You can narrow the output with `--search TEXT` and the same `--agent`, `--provider`, and `--model` flags as the list command.
+
+## Trials overview
+
+Use `harbor hub job trials JOB_ID` to list trials across one or more jobs. In an interactive terminal you can page through all trials without re-running the command.
+
+```bash
+harbor hub job trials JOB_ID
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--search TEXT` | Filter by text matching trial names. |
+| `--agent / --provider / --model` | Same as the list command. |
+| `--limit N` | Page size (default 100). |
+| `--failed-only` | Show only trials that errored or failed. |
+| `--all-attempts` | Include all retries, not just the final attempt. |
+| `--sort-by COL` | Sort by `started_at`, `task_name`, `name`, or `error_type`. |
+| `--sort-order asc \| desc` | Sort direction. |
+
+## Comparing jobs side by side
+
+Use `harbor hub job compare` to get a side-by-side performance grid for two or more jobs.
+
+```bash
+harbor hub job compare JOB_ID_1 JOB_ID_2
+```
+
+This is especially useful when benchmarking different agents or model versions against the same dataset.
+
+## Job visibility
+
+Use `harbor hub job shares JOB_ID` to see which organizations and users a job is shared with.
+
+```bash
+harbor hub job shares JOB_ID
+```
+
+For instructions on controlling visibility and sharing jobs with teammates, see [Sharing Jobs](/sharing/jobs).
+
+## Combined flags
+
+Every `harbor hub` command also accepts the following output-control flags:
+
+| Flag | Description |
+|------|-------------|
+| `-q, --quiet` | Print only IDs — useful for piping into `xargs`. |
+| `--no-trunc` | Show full cell content (wrap cells instead of truncating with an ellipsis). |
+| `--no-headers` | Omit the header row. |
+| `--page N` | Pull a specific page and disable interactive paging. |
+| `--json` | Return results as raw JSON. |
+| `--debug` | Show the full traceback on failure. |

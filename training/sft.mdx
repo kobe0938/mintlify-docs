@@ -1,0 +1,109 @@
+---
+title: "Generating SFT Datasets from Harbor Agent Trajectories"
+sidebarTitle: "SFT Export"
+description: "Export successful Harbor agent trials as conversational traces for supervised fine-tuning. Push datasets directly to Hugging Face Hub with a single CLI command."
+---
+
+Harbor includes utilities for turning agent trials into conversational traces you can feed into supervised fine-tuning pipelines. Export helpers live under `harbor.utils.traces_utils` and power several CLI entry points — from one-off exports to automatic post-run publishing.
+
+## ATIF trajectory format requirement
+
+The SFT exporter works with agents that produce trajectories in the ATIF format. Make sure your agent supports it before attempting an export.
+
+<Info>
+  **Compatible agents** include Terminus-2, OpenHands, Claude Code, Gemini CLI, and other agents with ATIF trajectory support. Agents that do not produce ATIF-format trajectories cannot be exported.
+</Info>
+
+For best results, configure your agent's trajectory settings before running the job:
+
+```python
+from harbor.models.agent.trajectory_config import TrajectoryConfig
+
+trajectory_config = TrajectoryConfig(
+    raw_content=True,      # Preserve exact LLM responses for SFT
+    linear_history=True    # Split on summarization for clean sequences
+)
+```
+
+- `raw_content=True` preserves the exact text returned by the model, which is essential for SFT targets.
+- `linear_history=True` splits trajectories at summarization boundaries so each training sequence is a clean, non-compressed turn history.
+
+Learn more in the [Terminus-2 documentation](/agents/terminus-2#trajectory-configuration).
+
+## What each exported row contains
+
+Each exported row represents one `agent/episode-*` directory and captures the `debug.json` input messages plus the final agent reply from `response.json` or `response.txt`. Rows include metadata fields — `agent`, `model`, `model_provider`, `task`, `trial_name`, `episode`, and `run_id` — so you can merge exports from multiple jobs without losing provenance.
+
+## `harbor traces export` command
+
+Run `harbor traces export` on a trial directory (or a parent directory that contains multiple trials) to build a `datasets.Dataset`. The command prints the number of rows produced and, when `--push` is set, uploads the dataset directly to Hugging Face Hub.
+
+```bash
+harbor traces export \
+  --path trials \
+  --recursive \
+  --episodes last \
+  --filter success \
+  --sharegpt \
+  --push \
+  --repo my-org/harbor-terminus2-sft
+```
+
+### Key options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--episodes` | `all \| last` | `all` | Export every episode or only the final attempt per trial. |
+| `--sharegpt` / `--no-sharegpt` | flag | Disabled | Add a ShareGPT-compatible column (` {"from": "...", "value": "..."}` schema) alongside the OpenAI-format conversations. |
+| `--filter` | `success \| failure \| all` | `all` | Keep only runs with positive rewards (`success`), zero or negative rewards (`failure`), or everything (`all`). Requires `result.json` to be present. |
+| `--push` | flag | Disabled | Upload the assembled dataset to the repo given by `--repo`. Set `HF_TOKEN` or `HUGGINGFACE_TOKEN` in your environment for authentication. |
+| `--verbose` | flag | Disabled | Print per-trial discovery details — useful when debugging missing episodes. |
+
+## Auto-export during `harbor run`
+
+Pass trace export flags alongside your job invocation to export automatically once a job completes:
+
+```bash
+harbor run \
+  --config examples/configs/features/job.yaml \
+  --agent claude-code \
+  --model anthropic/claude-3-sonnet-20240229 \
+  --export-traces \
+  --export-sharegpt \
+  --export-episodes last \
+  --export-push \
+  --export-repo my-org/harbor-job-run
+```
+
+When `--export-traces` is set, Harbor exports from the produced job directory using the same machinery as `harbor traces export`. The `--export-*` options mirror the standalone CLI flags and default to in-memory exports unless `--export-push` is provided. Export errors surface at the end of the job run without interrupting evaluation.
+
+## Sweep-level split exports
+
+`harbor sweeps run` can emit split datasets that separate successful and failed trajectories. Supply `--push` together with an export repo argument:
+
+```bash
+# Push a DatasetDict with "success" and "failure" splits
+harbor sweeps run \
+  --config examples/configs/features/job.yaml \
+  --max-sweeps 3 \
+  --trials-per-task 2 \
+  --push \
+  --export-repo my-org/harbor-sweeps
+```
+
+You can also push successes and failures to independent repos by combining `--push` with `--export-separate` (alias `--no-export-splits`) plus `--export-repo-success` and `--export-repo-failure`. These exports use the same trace discovery logic and default to the last episode from each trial.
+
+## Python API
+
+If you want to persist the dataset locally — for example, to Parquet — call the export helper directly from Python:
+
+```python
+from harbor.utils.traces_utils import export_traces
+
+dataset = export_traces("trials", episodes="last", success_filter="success")
+dataset.to_parquet("harbor-terminus2-success.parquet")
+```
+
+<Note>
+  The `datasets` library is an optional dependency. Install it with `pip install datasets` before calling `export_traces` or using any `harbor traces export` command.
+</Note>

@@ -1,0 +1,93 @@
+---
+title: "Injecting Skills into Agent Trials"
+sidebarTitle: "Skills"
+description: "Use Harbor skills to inject reusable instruction files, prompts, and context into agent trials from local directories or Git repositories."
+---
+
+Skills let you inject context files — prompts, coding rules, reference documentation — directly into the agent's sandbox at trial time. A skill is any directory that contains a `SKILL.md` file at its top level. When you pass a skill via `--skill`, Harbor copies the entire skill directory into the sandbox so the agent can read it during execution. This keeps reusable instructions out of your task definitions and makes them easy to version, share, and swap between runs.
+
+## Local skills
+
+Pass a path to a local directory to use it as a skill:
+
+```bash
+harbor run -d terminal-bench@2.0 -a claude-code \
+  --skill ./my-skills/python-style
+```
+
+The directory must contain a `SKILL.md` file at its top level or within subdirectories. Harbor copies the full directory into the agent sandbox before execution begins.
+
+## Git skills
+
+Reference a Git repository directly so you do not have to check skills into every project. Harbor clones the repository, resolves the commit SHA, and caches the result locally for future runs.
+
+### Shorthand syntax
+
+The shorthand format resolves to `github.com` and reads skills from the repository's `skills/` directory:
+
+```bash
+# Default branch
+harbor run --skill org/repo -a claude-code -d my-dataset
+
+# Specific tag or branch
+harbor run --skill org/repo@v1.2.0 -a claude-code -d my-dataset
+harbor run --skill org/repo@main -a claude-code -d my-dataset
+```
+
+### Full URL syntax
+
+Use a full HTTPS URL to target providers other than GitHub, or to point at a specific subdirectory inside a monorepo:
+
+```bash
+# Default branch, reads from repo/skills/
+harbor run --skill https://github.com/org/repo -a claude-code -d my-dataset
+
+# Specific subdirectory using /tree/<ref>/<path> format
+harbor run --skill https://github.com/org/repo/tree/main/skills/python \
+  -a claude-code -d my-dataset
+```
+
+The `/tree/<ref>/<subdir>` format lets you pull a single skill from a larger monorepo without cloning unnecessary content.
+
+## Multiple skills
+
+Use `--skill` multiple times to inject several skills into a single run. If two skills share the same directory name, the last one specified wins:
+
+```bash
+harbor run \
+  --skill org/common-skills \
+  --skill ./local-overrides \
+  -a claude-code -d my-dataset
+```
+
+This makes it straightforward to start from a shared baseline and layer in project-specific or experimental overrides.
+
+## Caching
+
+Harbor caches cloned Git skills locally at:
+
+```
+~/.cache/harbor/skills/<host>/<org>/<name>/<sha>/
+```
+
+Once a commit SHA is cached, subsequent runs skip the clone entirely. Different subdirectories from the same repository and commit are deduplicated automatically.
+
+To clear all cached skills:
+
+```bash
+rm -rf ~/.cache/harbor/skills
+```
+
+## Reproducibility
+
+When a job runs, Harbor records the full provenance of every skill in the job lock file. Each entry captures:
+
+| Field | Description |
+|-------|-------------|
+| `name` | The skill directory name as it appears in the sandbox |
+| `source` | The local path used during the run |
+| `digest` | SHA-256 content hash of all files in the skill directory |
+| `git_url` | Source repository URL (Git skills only) |
+| `git_commit_id` | Resolved commit SHA at time of run (Git skills only) |
+
+This ensures job results are fully traceable back to the exact skill content that was used — even if the branch has moved forward since the run completed.

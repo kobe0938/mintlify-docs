@@ -1,0 +1,162 @@
+---
+title: "Running Windows Container Tasks in Harbor"
+sidebarTitle: "Windows"
+description: "Configure Harbor tasks to run in Windows containers by setting environment.os = \"windows\" in task.toml. Requires a Windows host with Docker Desktop."
+---
+
+Harbor supports running tasks inside Windows containers — for example, images based on `windowsservercore` or `nanoserver`. Windows tasks work exactly like Linux tasks from the author's perspective: you write an instruction, a Dockerfile, and a test script. The only differences are a single field in `task.toml` and using `.bat` scripts instead of `.sh`.
+
+## Prerequisites
+
+Before running Windows tasks you need:
+
+- **Windows 10/11 Pro, Enterprise, or Education** (or **Windows Server 2019+**) — Windows Home does not support Hyper-V, which Windows containers require.
+- **Docker Desktop** installed and switched to **Windows containers** mode (right-click the system tray icon → "Switch to Windows containers...").
+- **`tar.exe`** available on the host — ships with Windows 10 1803+ at `C:\Windows\System32\tar.exe`.
+
+<Warning>
+  Windows tasks are supported only in the local Docker environment. Cloud providers (Daytona, Modal, E2B, and others) do not support Windows containers. Only agents with `SUPPORTS_WINDOWS = True` — currently `oracle` and `nop` — can run Windows tasks.
+</Warning>
+
+## Enabling Windows containers
+
+Set `os = "windows"` in the `[environment]` section of your `task.toml`:
+
+```toml
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+os = "windows"
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+```
+
+Omitting `os` (or setting it to `"linux"`) keeps the task on Linux containers — this is the default and preserves backward compatibility with all existing tasks.
+
+## What changes when os = "windows"
+
+Harbor adapts every OS-conditional behavior automatically when `os = "windows"` is set:
+
+| Behavior | Linux | Windows |
+|---|---|---|
+| Container-side log path | `/logs` | `C:/logs` |
+| Container-side test path | `/tests` | `C:/tests` |
+| Container-side solution path | `/solution` | `C:/solution` |
+| Container-side artifact path | `/logs/artifacts` | `C:/logs/artifacts` |
+| Test script | `test.sh` | `test.bat` |
+| Solution script | `solve.sh` | `solve.bat` |
+| Command execution | `bash -c <cmd>` | `cmd /S /C <cmd>` |
+| File transfer | `docker cp` | tar-over-exec (piped through `docker exec`) |
+| Container keepalive | `sh -c "sleep infinity"` | `cmd /C "ping -t localhost > nul"` |
+| `LOGS_DIR` env var | `/logs` | `C:\logs` |
+
+## Daemon-mode and image-OS validation
+
+Harbor performs two preflight checks when the environment starts:
+
+1. **Daemon mode** — Harbor calls `docker info --format "{{.OSType}}"` and compares the result to `[environment].os`. A mismatch fails fast with a message instructing you to switch Docker Desktop to the matching container mode.
+2. **Image OS** — After building or pulling the image, Harbor runs `docker inspect --format "{{.Os}}" <image>` and compares it to `[environment].os`. A mismatch fails fast with the actual image OS.
+
+These checks surface configuration mistakes immediately rather than mid-run.
+
+## Task directory structure
+
+A minimal Windows task looks like this:
+
+```
+my-windows-task/
+├── environment/
+│   └── Dockerfile
+├── solution/
+│   └── solve.bat
+├── tests/
+│   └── test.bat
+├── instruction.md
+└── task.toml
+```
+
+### Dockerfile
+
+Use any Windows-based Docker image. Tested base images include:
+
+```dockerfile
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+WORKDIR C:\\app
+```
+
+<Note>
+  Windows base images are several gigabytes in size. The first pull takes significantly longer than typical Linux images.
+</Note>
+
+### Test scripts (.bat)
+
+Test scripts must write a reward value to `%LOGS_DIR%\verifier\reward.txt`:
+
+```batch
+@echo off
+REM Run your verification logic here
+
+echo 1 > "%LOGS_DIR%\verifier\reward.txt"
+```
+
+### Solution scripts (.bat)
+
+Solution scripts use the same pattern as Linux tasks, written as batch files:
+
+```batch
+@echo off
+REM Perform the task
+echo Hello, Harbor! > C:\app\hello.txt
+```
+
+## Multi-step Windows tasks
+
+Multi-step Windows tasks use the same `steps/` directory layout as Linux tasks, with `.bat` entrypoints:
+
+```
+my-windows-task/
+├── steps/
+│   └── grade/
+│       ├── instruction.md
+│       ├── solution/
+│       │   └── solve.bat
+│       └── tests/
+│           └── test.bat
+├── environment/
+│   └── Dockerfile
+└── task.toml
+```
+
+For each step, Harbor looks for `steps/<step>/tests/test.bat` first. If the step does not provide its own test script, Harbor falls back to the shared top-level `tests/test.bat`.
+
+## Running a Windows task
+
+Run a Windows task with the Oracle agent to verify your solution works:
+
+```bash
+uv run harbor run -p examples/tasks/hello-world-bat -a oracle --debug
+```
+
+## Limitations
+
+- **Windows host only** — Windows containers cannot run on Linux or macOS hosts.
+- **No GPU support** — Windows containers in Harbor do not support GPU allocation.
+- **No internet isolation** — `network_mode: none` has not been validated with Windows containers.
+- **Local Docker only** — Cloud providers do not support Windows containers.
+- **Agent compatibility** — Only agents with `SUPPORTS_WINDOWS = True` (`oracle` and `nop`) can run Windows tasks. Agents that depend on Linux-only tools (`bash`, `apt-get`, `tmux`) are rejected with a clear error before setup.
+- **Performance** — Windows base images result in longer initial pulls and slower first builds compared to Linux images.
+
+## Sample tasks
+
+The Harbor repository includes ready-to-run Windows examples:
+
+| Sample | Script type | Path |
+|---|---|---|
+| `hello-world-bat` | Batch (`.bat`) | `examples/tasks/hello-world-bat/` |
+| `hello-multi-step-bat` | Batch, multi-step | `examples/tasks/hello-multi-step-bat/` |

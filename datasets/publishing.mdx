@@ -1,0 +1,234 @@
+---
+title: "Publishing Datasets to the Harbor Registry"
+sidebarTitle: "Publishing"
+description: "Publish Harbor datasets to the registry to share tasks with your organization or the public. Learn versioning, registry.json format, and dataset distribution."
+---
+
+Publishing a dataset to the [Harbor registry](https://hub.harborframework.com/) makes it available to your entire organization or to the public — letting others run your benchmark with a single `harbor run -d` command. This guide walks you through every step from login to your first published run.
+
+<Info>
+  **Agent skill available**
+
+  Want your coding agent to walk you through publishing? Install the `publish` skill:
+
+  ```bash
+  npx skills add harbor-framework/harbor --skill publish
+  ```
+</Info>
+
+If you are new to Harbor, read about [dataset composition](/datasets/overview) first.
+
+## Public vs. private datasets
+
+When you publish a dataset, you choose its visibility:
+
+- **Private** — visible only to members of your publishing organization. This is the default.
+- **Public** — visible and runnable by anyone. Use this to maximize adoption of your benchmark.
+
+You can toggle visibility at any time using `harbor dataset visibility` or through the UI on the [registry website](https://hub.harborframework.com/).
+
+---
+
+## Prerequisites
+
+### Log in to the Harbor registry
+
+Before publishing, authenticate with your Harbor account:
+
+```bash
+harbor auth login
+```
+
+This opens a GitHub sign-in flow and creates your Harbor account if you do not already have one. New accounts receive an organization named after your GitHub username by default. You can publish to any organization you own. If you publish to an organization that does not exist yet, Harbor creates it for you.
+
+Verify your session at any time:
+
+```bash
+harbor auth status
+```
+
+### Update old tasks
+
+Task identifiers are defined in the `[task]` section of each `task.toml` as `<org>/<name>`. Tasks created before March 30, 2026 may be missing this section. Add it before including those tasks in a dataset:
+
+```bash
+harbor task update "<path/to/task>" --org "<org>"
+```
+
+To update an entire directory at once, include the `--scan` flag:
+
+```bash
+harbor task update "<path/to/tasks>" --org "<org>" --scan
+```
+
+---
+
+## Steps
+
+<Steps>
+
+### Initialize a dataset manifest
+
+A dataset is defined by a `dataset.toml` manifest that lists its tasks and optional metric file. Initialize one with:
+
+```bash
+harbor dataset init "<org>/<dataset>" \
+  --description "A short description" \
+  --author "Your Name <your@email.com>"
+```
+
+If you want to include a custom metric script, add the `--with-metric` flag:
+
+```bash
+harbor dataset init "<org>/<dataset>" --with-metric
+```
+
+This creates:
+
+```
+<dataset>/
+├── dataset.toml
+└── metric.py            # only if --with-metric
+```
+
+<Note>
+  If you initialize a dataset in a directory that already contains task subdirectories, Harbor auto-adds those tasks to `dataset.toml`. Similarly, any task initialized in the same directory as an existing `dataset.toml` is added automatically.
+</Note>
+
+### Add tasks and files
+
+Navigate to your dataset directory, then use `harbor add` to explicitly include tasks.
+
+```bash
+cd "<path/to/dataset>"
+```
+
+**Add local tasks:**
+
+```bash
+harbor add "<path/to/task-a>" "<path/to/task-b>"
+```
+
+You can also add all tasks from a local `dataset.toml`:
+
+```bash
+harbor add "<path/to/dataset.toml>"
+```
+
+**Add registered tasks or datasets from the registry:**
+
+```bash
+harbor add org/name-of-task
+```
+
+By default, `harbor add` resolves the latest published version. Pin to a specific version with `"<org>/<name>@<tag>"`, `"<org>/<name>@<revision>"`, or `"<org>/<name>@sha256:<hash>"`. You can also add all tasks from a published dataset:
+
+```bash
+harbor add org/name-of-dataset
+```
+
+**Add all tasks from a local folder:**
+
+```bash
+harbor add "<path/to/candidate-tasks>" --scan
+```
+
+**Add a metric file:**
+
+If your `dataset.toml` does not yet reference a `metric.py`, add it by filename from the same directory:
+
+```bash
+harbor add metric.py
+```
+
+**Remove tasks:**
+
+```bash
+harbor remove "<org>/<name-of-task>"
+```
+
+`harbor remove` accepts the same arguments as `harbor add`.
+
+### Sync task and file digests
+
+`dataset.toml` references every task and metric file by its SHA-256 digest. Harbor automatically refreshes local digests when you publish, but you can also refresh them manually at any time:
+
+```bash
+harbor sync
+```
+
+To also upgrade remote tasks to their latest published versions, add `--upgrade`:
+
+```bash
+harbor sync --upgrade
+```
+
+### Publish the dataset
+
+Run `harbor publish` from the dataset directory:
+
+```bash
+harbor publish "<path/to/dataset>"
+```
+
+By default, this also publishes any tasks found in the dataset directory and tags the release as `latest`.
+
+**Common publish options:**
+
+| Flag | Description |
+|---|---|
+| `-t / --tag` | Add one or more version tags (repeatable). `latest` is always added. |
+| `--public` | Make the dataset publicly accessible. |
+| `--no-tasks` | Skip publishing tasks in the dataset directory. |
+| `-c / --concurrency` | Control upload concurrency. |
+
+**Tag a version and make it public:**
+
+```bash
+harbor publish "<path/to/dataset>" -t v1.0 --public
+```
+
+**Publish without re-publishing tasks:**
+
+```bash
+harbor publish "<path/to/dataset>" --no-tasks
+```
+
+### Run your published dataset
+
+After publishing, evaluate any agent against your dataset:
+
+```bash
+harbor run -d "my-org/my-dataset@v1.0" -a "<agent>" -m "<model>"
+```
+
+</Steps>
+
+---
+
+## Versioning and tags
+
+Dataset versions are publish-time tags, not a field inside `dataset.toml`. Every publish automatically receives the `latest` tag so that `-d my-org/my-dataset` (with no `@`) always points at the newest release. Add explicit version tags with `-t`:
+
+```bash
+harbor publish "<path/to/dataset>" -t v1.0 -t stable --public
+```
+
+Previously published tags remain pinned to their original snapshots, so pinned runs stay reproducible.
+
+## Sharing
+
+If you published publicly, anyone can run your dataset. If you published privately, only members of your organization can run it. You can toggle visibility at any time using `harbor dataset visibility` or through the UI on [the registry website](https://hub.harborframework.com/).
+
+Full access-control documentation is covered in [Sharing](/sharing/jobs).
+
+## Related docs
+
+<CardGroup cols={2}>
+  <Card title="Datasets overview" icon="database" href="/datasets/overview">
+    Understand dataset concepts and the three ways to use them.
+  </Card>
+  <Card title="Custom metrics" icon="chart-bar" href="/datasets/metrics">
+    Define custom aggregate metrics for your published dataset.
+  </Card>
+</CardGroup>

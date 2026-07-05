@@ -1,0 +1,323 @@
+---
+title: "Reward Kit: Define Verifiers for Harbor Tasks"
+sidebarTitle: "Overview"
+description: "Reward Kit is a standalone Python package for building task verifiers. Use programmatic criteria, LLM judges, and weighted scoring to grade agent completions."
+---
+
+Reward Kit is a standalone Python package for defining and running verifiers against an agent's workspace and trajectory. It has zero external dependencies, writes scores to a JSON file, and organizes criteria through directory structure — each folder maps to a reward, making verifiers easy to read, share, and extend. All criteria run in parallel by default.
+
+## Installation
+
+Install Reward Kit as a standalone tool using `uv`:
+
+```bash
+uv tool install harbor-rewardkit
+```
+
+For criteria or judges that read images or common document files (PDF, DOCX, PPTX, XLSX), install the extras:
+
+```bash
+uv tool install harbor-rewardkit[all]
+```
+
+## Using with Harbor
+
+Harbor copies your task's `tests/` directory into the container at `/tests/` and runs `test.sh`. Put your criteria files alongside `test.sh` in the `tests/` directory:
+
+```
+tests/
+├── checks.py
+├── judge.toml
+└── test.sh
+```
+
+Then invoke Reward Kit from `test.sh`:
+
+```bash title="tests/test.sh"
+#!/bin/bash
+uvx --with harbor-rewardkit@0.1 rewardkit /tests
+```
+
+This discovers all criteria in `/tests/`, evaluates them against the workspace at `/app`, and writes the result to `/logs/verifier/reward.json`:
+
+```json title="/logs/verifier/reward.json"
+{ "reward": 0.75 }
+```
+
+All defaults match Harbor's conventions, so no additional flags are needed in most cases.
+
+<Tip>
+  If your judge criteria need API keys, pass them through `[verifier.env]` in `task.toml`:
+
+  ```toml title="task.toml"
+  [verifier]
+  timeout_sec = 300.0
+
+  [verifier.env]
+  ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
+  ```
+</Tip>
+
+## How Reward Kit Discovers Criteria
+
+Reward Kit scans the test directory for two types of files:
+
+- **Python files** — any `.py` file containing functions decorated with `@criterion`, or calls to built-in criteria via `rk.*`
+- **TOML files** — any `.toml` file with a `[judge]` section configuring an LLM or agent judge
+
+Both file types can coexist in the same directory. Their scores are combined into one reward using a weighted average.
+
+## Programmatic Criteria
+
+Use the `@criterion` decorator to define custom checks. The first parameter is always `workspace: Path`, and the function returns a `bool` or `float`. Zero-argument criteria are registered automatically when the file is imported:
+
+```python title="tests/check.py"
+import rewardkit as rk
+from pathlib import Path
+from rewardkit import criterion
+
+@criterion
+def has_valid_output(workspace: Path) -> bool:
+    output = (workspace / "output.txt").read_text()
+    return len(output.splitlines()) >= 10
+```
+
+Criteria can also accept custom arguments. Call them explicitly through `rk` to register them, and you can register the same criterion multiple times with different parameters:
+
+```python title="tests/check.py"
+@criterion(description="output has at least {n} lines")
+def has_n_lines(workspace: Path, n: int) -> bool:
+    output = (workspace / "output.txt").read_text()
+    return len(output.splitlines()) >= n
+
+rk.has_n_lines(10, weight=2.0)
+rk.has_n_lines(50, weight=1.0)
+```
+
+See [Built-in Criteria](/rewardkit/built-in-criteria) for the 20+ ready-made functions covering files, commands, JSON, CSV, HTTP, images, and trajectories.
+
+## Judge Criteria
+
+For subjective dimensions — code quality, edge-case handling, readability — you can have an LLM evaluate the workspace by creating a TOML file:
+
+```toml title="tests/quality.toml"
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+files = ["/app/main.py"]
+
+[[criterion]]
+description = "Is the code correct?"
+type = "binary"
+
+[[criterion]]
+description = "How readable is the code?"
+type = "likert"
+points = 5
+```
+
+See [Judge Criteria](/rewardkit/judge-criteria) for the full TOML configuration reference, including agent judges and trajectory evaluation.
+
+## Multi-Reward Tasks
+
+When you want separate scores for different dimensions — correctness, structure, quality — organize criteria into subdirectories. Each subdirectory becomes its own reward key:
+
+```
+tests/
+├── test.sh
+├── correctness/
+│   └── check.py
+├── structure/
+│   └── files_exist.py
+└── quality/
+    └── quality.toml
+```
+
+This produces a separate score per dimension:
+
+```json title="/logs/verifier/reward.json"
+{ "correctness": 0.75, "structure": 1.0, "quality": 0.6 }
+```
+
+To reuse custom criteria across subdirectories, define them in a root-level file with `shared=True`:
+
+```python title="tests/criteria.py"
+from pathlib import Path
+from rewardkit import criterion
+
+@criterion(shared=True)
+def word_count_correct(workspace: Path) -> float:
+    # test logic ...
+    return score
+```
+
+```python title="tests/correctness/check.py"
+import rewardkit as rk
+
+rk.word_count_correct(weight=3.0)
+```
+
+## Weights and Scoring
+
+Every criterion accepts an optional `weight` parameter (default `1.0`). All criteria in a reward directory are aggregated using a weighted average:
+
+```python
+rk.file_exists("output.txt", weight=3.0)
+rk.file_exists("readme.md", weight=1.0)
+```
+
+For judge criteria, you can also weight the entire judge file relative to other criteria in the same directory, and control how the judge's own criteria are aggregated using a `[scoring]` section:
+
+```toml title="tests/quality.toml"
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+files = ["/app/main.py"]
+weight = 2.0  # weight of this judge in the overall reward (default 1.0)
+
+[[criterion]]
+description = "Is the code correct?"
+type = "binary"
+weight = 2.0
+
+[[criterion]]
+description = "How readable is the code?"
+type = "likert"
+points = 5
+
+[scoring]
+aggregation = "all_pass"  # weighted_mean | all_pass | any_pass | threshold | required_pass
+```
+
+<Info>
+  `required_pass` returns 1.0 only when every non-`optional` criterion passes (`value > 0`). Criteria marked `optional = true` never gate the overall score.
+</Info>
+
+## Isolation
+
+Some criteria modify the workspace — by running commands, creating files, or making edits. To prevent one criterion from affecting another, run it in isolation. Reward Kit uses overlayfs to mount the workspace read-only, with writes going to a temporary layer that is discarded after the criterion completes.
+
+For programmatic criteria, pass `isolated=True`:
+
+```python
+rk.command_succeeds("python main.py", isolated=True)
+```
+
+For agent judges, set `isolated = true` in the `[judge]` section:
+
+```toml
+[judge]
+judge = "claude-code"
+isolated = true
+```
+
+## Output
+
+Reward Kit writes two files side by side:
+
+- **`reward.json`** — per-reward scores, e.g. `{"correctness": 0.75, "quality": 0.9}`
+- **`reward-details.json`** — per-criterion results including individual scores, judge reasoning, and any errors. `harbor view` renders this under **Verifier Logs → Rewards** as a collapsible tree.
+
+### Aggregating Dimensions
+
+To add aggregated scores on top of the per-dimension keys, create a root-level `tests/reward.toml` with one or more `[[reward]]` tables. Each table adds one key to `reward.json`, aggregating the per-dimension scores using the same modes available within a judge:
+
+```toml title="tests/reward.toml"
+[[reward]]
+name = "reward"
+aggregation = "all_pass"
+
+[[reward]]
+name = "soft_score"
+aggregation = "weighted_mean"
+```
+
+```json title="reward.json"
+{ "correctness": 0.75, "structure": 1.0, "quality": 0.6, "reward": 0.0, "soft_score": 0.78 }
+```
+
+The per-dimension scores are kept; the aggregated keys are added alongside them. Each dimension is weighted by the sum of its criteria weights. Set the name of an aggregated score to `reward` to make it the main score that Harbor parses when grading a task.
+
+## Comparing Verifiers
+
+Pass multiple test directories to compare different verifier designs side by side:
+
+```bash
+rewardkit /tests/v1 /tests/v2
+```
+
+Reward Kit runs each directory independently and prints a comparison table for overlapping reward names:
+
+```
+Comparison:
+------------------------------------------
+reward          v1      v2    diff
+------------------------------------------
+correctness  0.7500  0.9000  -0.1500
+structure    1.0000  1.0000  +0.0000
+------------------------------------------
+```
+
+The combined output is written to `reward.json` with namespaced keys like `"v1/correctness"` and `"v2/correctness"`.
+
+## CLI Reference
+
+```bash
+rewardkit <tests_dirs...> \
+    --workspace /app \
+    --output /logs/verifier/reward.json \
+    --max-concurrent-programmatic 8 \
+    --max-concurrent-llm 8 \
+    --max-concurrent-agent 2
+```
+
+All flags are optional with sensible defaults. Passing multiple test directories runs each independently and prints a comparison table.
+
+## Python API
+
+You can run verifiers and inspect discovered rewards programmatically:
+
+```python
+import rewardkit as rk
+
+# Run all criteria and get scores
+scores = rk.run("/tests", workspace="/app")
+
+# Inspect discovered rewards without running them
+rewards = rk.discover("/tests", workspace="/app")
+```
+
+## Provider Routing
+
+Judges call LiteLLM, which reads credentials from host environment variables. Use the following flags to swap providers without editing your rubric files:
+
+<AccordionGroup>
+  <Accordion title="--judge flag and REWARDKIT_JUDGE env var">
+    `--judge MODEL_OR_AGENT` overwrites the `[judge].judge` field in all TOML files for the current run. Set `REWARDKIT_JUDGE` in the environment for the same effect. Harbor users can pass `--ve REWARDKIT_JUDGE=...` to override the judge at task launch time.
+
+    ```bash
+    rewardkit /tests \
+      --judge bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0 \
+      --je AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+      --je AWS_REGION_NAME=us-east-1
+    ```
+  </Accordion>
+  <Accordion title="--model flag and REWARDKIT_MODEL env var">
+    `--model MODEL` overwrites the `[judge].model` field when the judge is an agent (e.g. `claude-code`, `codex`). Equivalent to setting `REWARDKIT_MODEL`. Harbor users can pass `--ve REWARDKIT_MODEL=...`.
+
+    ```bash
+    rewardkit /tests \
+      --judge claude-code \
+      --model anthropic/claude-sonnet-4-6
+    ```
+  </Accordion>
+  <Accordion title="--je flag for environment variables">
+    `--je KEY=VALUE` sets environment variables for the run (repeatable). This has the same shape as Harbor's `--ve` flag and is useful for passing credentials without polluting your shell environment.
+  </Accordion>
+</AccordionGroup>
+
+The [LiteLLM provider docs](https://docs.litellm.ai/docs/providers) list the environment variable configurations for each provider.
+
+### Subscription Auth
+
+For Anthropic LLM judge models, a Claude subscription token is used when it is the only Anthropic credential present. Create one with `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`. When both `ANTHROPIC_API_KEY` and the token are set, the API key takes priority — set `REWARDKIT_FORCE_OAUTH=1` to prefer the subscription token instead.
+
+For the `codex` agent judge, set `CODEX_ACCESS_TOKEN` to a ChatGPT access token (created by Business/Enterprise workspace admins at chatgpt.com/admin/access-tokens). Reward Kit logs the CLI in with it before grading. As with Anthropic, `OPENAI_API_KEY` has priority when both are set — set `REWARDKIT_FORCE_OAUTH=1` to prefer the access token instead.

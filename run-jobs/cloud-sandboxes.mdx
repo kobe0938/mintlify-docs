@@ -1,0 +1,64 @@
+---
+title: "Scale Evaluations with Cloud Sandboxes"
+sidebarTitle: "Cloud Sandboxes"
+description: "Accelerate Harbor evaluations by running trials on cloud sandbox providers like Daytona, Modal, and E2B — scale to dozens of parallel trials."
+---
+
+Containerized agentic tasks are inherently slow: each trial pays container startup and teardown overhead, waits on LLM API calls, and blocks on command execution inside the sandbox. When you are running dozens or hundreds of tasks, these costs stack up quickly. Because the workload is largely I/O-bound rather than compute-bound, horizontal scaling — running many trials in parallel across cloud sandboxes — is the most effective way to cut wall-clock time.
+
+## Using a cloud sandbox provider
+
+Pass the `-e` flag to select a provider and `-n` to set the number of trials to run in parallel. The command below runs a benchmark on Daytona with 32 parallel trials:
+
+```bash
+harbor run -d "<org/name>" \
+  -m "<model>" \
+  -a "<agent>" \
+  -e daytona \
+  -n 32
+```
+
+Shifting execution to a cloud provider makes trials I/O-bounded on the provider side, which means you can typically parallelize well above your local CPU count. Harbor has been tested running up to 100 parallel trials on a MacBook Pro with 14 cores.
+
+<Note>
+**Removing internet restrictions on Daytona**
+
+By default, Daytona accounts have internet access restrictions that can prevent many benchmarks from running correctly. Use the coupon code **HARBOR_NETWORK** on your Daytona account to remove these restrictions.
+</Note>
+
+## Supported providers
+
+Harbor supports the following cloud sandbox providers:
+
+| Provider | Notes |
+|----------|-------|
+| [Daytona](https://www.daytona.io/) | Recommended starting point; supports multi-container tasks |
+| [Modal](https://modal.com/) | Single-container only |
+| [E2B](https://e2b.dev/) | Single-container only |
+| [Runloop](https://runloop.ai/) | Single-container only |
+| [Tensorlake](https://docs.tensorlake.ai/sandboxes/harbor) | Single-container only |
+| [Islo](https://islo.dev/rl) | Supports multi-container tasks |
+| [CoreWeave Sandboxes](https://www.coreweave.com/products/coreweave-sandboxes) | Single-container only |
+| [W&B Sandboxes](https://docs.wandb.ai/sandboxes) | Single-container only |
+| [LangSmith](https://docs.langchain.com/langsmith/home) | Supports multi-container tasks |
+| [Blaxel](https://blaxel.ai/) | Supports multi-container tasks |
+| [Novita Sandbox](https://novita.ai/) | Supports multi-container tasks |
+| [Amazon EC2](https://aws.amazon.com/ec2/) | Supports multi-container tasks |
+| [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) | Single-container only |
+| [Beam](https://beam.cloud/) | Supports multi-container tasks |
+
+## Multi-container deployments
+
+Some providers support multi-container task environments defined with a `docker-compose.yaml` file inside your task definition's `environment/` directory. These providers can run tasks that rely on sidecar services such as databases, mock APIs, or monitoring agents alongside the main container.
+
+**Providers that support `docker-compose.yaml`:**
+Daytona, Amazon EC2, Islo, LangSmith, Blaxel, Novita Sandbox, and Beam.
+
+**Providers limited to single-container tasks:**
+Modal, E2B, Runloop, Tensorlake, CoreWeave Sandboxes, W&B Sandboxes, and OpenSandbox.
+
+<Tip>
+If your benchmark requires multi-container environments and you want cloud scaling, Daytona is the most straightforward choice — it supports compose tasks and has the broadest Harbor integration.
+</Tip>
+
+If you use a provider that does not support multi-container environments with a task that declares a `docker-compose.yaml`, Harbor will fail the trial at start with a clear error message.

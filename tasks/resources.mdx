@@ -1,0 +1,138 @@
+---
+title: "Managing Container Resources for Harbor Tasks"
+sidebarTitle: "Resources"
+description: "Declare CPU, memory, storage, GPU, and TPU requirements for Harbor tasks in task.toml. Learn how Harbor applies resource specs across different providers."
+---
+
+Harbor lets you declare the compute resources your task needs directly in `task.toml`. When you run the task, Harbor applies those requirements to the container environment using enforcement policies that you control. This ensures your task gets the resources it needs and fails clearly when the selected provider cannot satisfy the request.
+
+## Declaring resources in task.toml
+
+All resource fields live under `[environment]`. Every field is optional — omit any field and Harbor leaves that dimension to the provider's default sizing.
+
+```toml
+[environment]
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+gpus = 1
+gpu_types = ["H100", "A100"]
+
+[environment.tpu]   # optional; GKE only
+type = "v6e"
+topology = "2x4"
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `cpus` | `integer \| null` | Number of CPUs requested |
+| `memory_mb` | `integer \| null` | RAM in megabytes |
+| `storage_mb` | `integer \| null` | Ephemeral disk in megabytes |
+| `gpus` | `integer \| null` | Number of GPUs requested |
+| `gpu_types` | `list[string] \| null` | Acceptable GPU types; `null` means any type is acceptable |
+| `tpu.type` | `string` | TPU accelerator type (alias or canonical GKE label) |
+| `tpu.topology` | `string` | TPU topology as `NxM` or `NxMxK` (required when `tpu` is set) |
+
+## CPU and memory enforcement policies
+
+CPU and memory each have an independent enforcement policy that controls how Harbor passes the declared value to the provider.
+
+| Policy | Meaning | Requires a declared value? |
+|---|---|---|
+| `auto` | Use the provider's default sizing behavior | No |
+| `limit` | Hard ceiling only — the container cannot exceed this amount | Yes |
+| `request` | Reservation only — the container is guaranteed at least this amount, with no hard ceiling | Yes |
+| `guarantee` | Both a reservation and a hard ceiling — the container gets exactly this amount | Yes |
+| `ignore` | Do not pass the value to the provider | No |
+
+Set policies on the command line with `--cpus` and `--memory`:
+
+```bash
+harbor run -p "<path/to/task>" -m "<model>" -a "<agent>" \
+  -e docker --cpus limit --memory guarantee
+```
+
+Or set them in a job or trial config file:
+
+```yaml
+environment:
+  type: docker
+  cpu_enforcement_policy: limit
+  memory_enforcement_policy: auto
+```
+
+<Note>
+  Harbor validates enforcement policies at job creation. Unsupported combinations fail before any trials run. `limit` and `guarantee` require the provider to support hard limits; `request` and `guarantee` require reservation support.
+</Note>
+
+## Overriding resource values at run time
+
+You can replace the task's declared resource values at run time without editing `task.toml`:
+
+```bash
+harbor run -p "<path/to/task>" -a "<agent>" \
+  --override-cpus 4 \
+  --override-memory-mb 8192 \
+  --override-storage-mb 20480 \
+  --override-gpus 2 \
+  --override-tpu v6e=2x4
+```
+
+These flags replace the corresponding `[environment]` values for that run only.
+
+## Storage, GPUs, and TPUs
+
+Storage, GPU, and TPU requests do not use enforcement policies. Harbor passes declared values directly to providers that support them:
+
+| Resource | Supported providers |
+|---|---|
+| Storage | Daytona, Islo, Runloop, GKE, and others |
+| GPUs | Modal, GKE, Daytona |
+| TPUs | GKE |
+
+### TPU specification
+
+The `[environment.tpu]` table requests a TPU slice for your task. Two fields are required when the table is present:
+
+| Field | Description |
+|---|---|
+| `type` | TPU accelerator type. Accepts user-friendly aliases such as `v3`, `v4`, `v5e`, `v5p`, `v6e`, `v7`, `trillium`, `ironwood`, or canonical GKE labels such as `tpu-v6e-slice`. |
+| `topology` | Topology string in `NxM` or `NxMxK` format (e.g., `"2x4"`, `"2x2x1"`). The per-pod chip count is the product of all dimensions — `"2x4"` gives 8 chips, `"2x2x1"` gives 4. |
+
+```toml
+[environment.tpu]
+type = "v6e"      # trillium TPU
+topology = "2x4"  # 8 chips per pod
+```
+
+<Warning>
+  You cannot request both GPUs and TPUs on the same task when using GKE. Harbor fails fast at environment start if both `gpus` and `[environment.tpu]` are set.
+</Warning>
+
+`topology` is required. GKE's implicit default topology is not part of a stable contract, so omitting it would make Harbor runs non-reproducible across GKE versions.
+
+## Separate verifier environments
+
+Separate verifier containers can declare their own resource requirements under `[verifier.environment]` using the same fields:
+
+```toml
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+docker_image = "my-org/grading-image:latest"
+cpus = 1
+memory_mb = 512
+```
+
+## Validation
+
+Harbor validates resource requirements at different points in the run lifecycle:
+
+| Check | When |
+|---|---|
+| Enforcement policy vs provider capabilities | Job creation |
+| Missing value for a non-`auto`/`ignore` policy | Environment start |
+| GPU / TPU requirements vs provider capabilities | Environment start |
+| GPU and TPU both set (GKE) | Environment start |
+| GPU on a docker-compose task (Daytona) | Environment start |

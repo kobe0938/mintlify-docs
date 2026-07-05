@@ -1,0 +1,156 @@
+---
+title: "Running Datasets from Git Repositories"
+sidebarTitle: "Git Repos"
+description: "Run Harbor datasets directly from any GitHub, GitLab, or Hugging Face repository using the --repo flag with optional branch or tag pinning."
+---
+
+Harbor can resolve and run datasets directly from Git repositories using the `--repo` flag. This lets you benchmark against any repository-hosted dataset without publishing it to the Harbor registry first — useful for private repositories, in-development benchmarks, or datasets maintained outside of Harbor.
+
+## Quick start
+
+```bash
+harbor run --repo org/repo-name -d my-dataset -a claude-code -m anthropic/claude-sonnet-4
+```
+
+Harbor clones the repository, reads its `registry.json` manifest, and runs the dataset named `my-dataset`.
+
+## Specifying the repository
+
+The `--repo` flag accepts several formats:
+
+```bash
+# GitHub shorthand (defaults to github.com)
+--repo org/repo-name
+
+# Pinned to a branch, tag, or commit
+--repo org/repo-name@v1.0
+--repo org/repo-name@main
+--repo org/repo-name@abc1234
+
+# Full HTTPS URL
+--repo https://github.com/org/repo-name
+
+# Subdirectory via /tree/ path
+--repo https://github.com/org/repo-name/tree/main/benchmarks
+
+# Hugging Face
+--repo https://huggingface.co/datasets/org/repo-name
+
+# GitLab
+--repo https://gitlab.com/org/repo-name
+```
+
+When you omit a `@ref`, Harbor uses the repository's default branch.
+
+## Supported platforms
+
+<CardGroup cols={3}>
+  <Card title="GitHub" icon="github">
+    Use shorthand (`org/repo`) or full `https://github.com/` URLs.
+  </Card>
+  <Card title="GitLab" icon="gitlab">
+    Use full `https://gitlab.com/` URLs.
+  </Card>
+  <Card title="Hugging Face" icon="database">
+    Use full `https://huggingface.co/datasets/` URLs.
+  </Card>
+</CardGroup>
+
+## How it works
+
+<Steps>
+
+### Parse the repo reference
+
+Harbor parses the `--repo` value to extract the host, organization, repository name, optional ref, and optional subdirectory path.
+
+### Resolve the ref to a commit SHA
+
+Harbor calls `git ls-remote` to resolve the ref to an immutable Git SHA. Pinned refs (`@v1.0`, `@abc1234`) resolve once and are reused from cache. Branch refs (`@main`) re-resolve the SHA on each run.
+
+### Sparse-checkout into local cache
+
+The repository is sparse-checked-out into `~/.harbor/cache/`, keyed by the resolved SHA. Repeated runs of the same pinned ref skip the network entirely.
+
+### Read `registry.json`
+
+Harbor reads `registry.json` in the repository root (or in the targeted subdirectory) to discover the available datasets and their task lists.
+
+### Match and run the dataset
+
+Harbor matches the `--dataset` name against the registry and resolves the tasks from the checked-out repo, then runs the evaluation exactly as it would for a local or published dataset.
+
+</Steps>
+
+## Selecting a dataset
+
+With `--repo`, pass a bare name to `--dataset` — no `org/` prefix needed:
+
+```bash
+# Run the "lite" dataset from the repo's registry.json
+harbor run --repo org/my-benchmarks -d lite -a claude-code -m anthropic/claude-sonnet-4
+
+# Run a specific version of the dataset
+harbor run --repo org/my-benchmarks -d lite@1.2 -a claude-code -m anthropic/claude-sonnet-4
+```
+
+If the repo's `registry.json` defines only one dataset, you can omit `--dataset` entirely.
+
+## Combining with other flags
+
+Standard run flags work alongside `--repo`:
+
+```bash
+# Include only specific tasks
+harbor run --repo org/benchmarks -d suite \
+  -i "task-a" -i "task-b" \
+  -a claude-code -m anthropic/claude-sonnet-4
+
+# Limit the number of tasks
+harbor run --repo org/benchmarks -d suite \
+  -l 10 \
+  -a claude-code -m anthropic/claude-sonnet-4
+
+# Use a custom registry.json path within the repo
+harbor run --repo org/benchmarks \
+  --registry-path benchmarks/registry.json \
+  -d suite -a claude-code -m anthropic/claude-sonnet-4
+```
+
+<Warning>
+  `--repo` cannot be combined with `--registry-url` or the `--task` / `--task-git-url` flags.
+</Warning>
+
+## Repository layout
+
+A repository used with `--repo` must contain a `registry.json` at its root or in the targeted subdirectory. This is the same format used by the local `--registry-path` option:
+
+```
+my-benchmarks/
+├── registry.json
+├── task-a/
+│   ├── task.toml
+│   ├── instruction.md
+│   ├── environment/
+│   └── tests/
+├── task-b/
+│   └── ...
+└── ...
+```
+
+The `registry.json` maps dataset names to their task lists. See the [Harbor task format](/tasks/overview) for the full task directory structure.
+
+## Authentication
+
+Public repositories work without any configuration. For private repositories, Harbor uses the Git credentials available in your environment — SSH keys, credential helpers, `GIT_ASKPASS`, and so on. If `git ls-remote` can reach the repository, `--repo` will work.
+
+## Related docs
+
+<CardGroup cols={2}>
+  <Card title="Datasets overview" icon="database" href="/datasets/overview">
+    Learn about all three ways to use datasets in Harbor.
+  </Card>
+  <Card title="Publishing" icon="upload" href="/datasets/publishing">
+    Publish your dataset to the Harbor registry for easier sharing.
+  </Card>
+</CardGroup>

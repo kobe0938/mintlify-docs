@@ -1,0 +1,213 @@
+---
+title: "Multi-Step Tasks in Harbor"
+sidebarTitle: "Multi-Step"
+description: "Define Harbor tasks with multiple sequential steps, each with its own instruction, tests, and verifier environment. Use multi_step_reward_strategy to aggregate scores."
+---
+
+A multi-step task runs an agent through a sequence of ordered steps against a single shared environment. Each step has its own instruction, test script, and optional setup hook. Steps run sequentially, share the container filesystem, and produce individual verifier results that roll up into a single trial-level reward.
+
+Multi-step tasks are useful for long-horizon evaluation scenarios, testing whether agents can build on prior work, and implementing early-stopping conditions based on intermediate performance.
+
+<Tip>
+  Want your coding agent to scaffold a multi-step task interactively? Install the `create-task` skill:
+
+  ```bash
+  npx skills add harbor-framework/harbor --skill create-task
+  ```
+</Tip>
+
+## Directory layout
+
+A multi-step task replaces the single-step `instruction.md`, `tests/`, and `solution/` at the task root with a `steps/` directory containing one sub-directory per step:
+
+```
+my-task/
+├── task.toml
+├── environment/
+│   └── Dockerfile
+├── steps/
+│   ├── step-one/
+│   │   ├── instruction.md
+│   │   ├── workdir/
+│   │   │   └── setup.sh
+│   │   ├── tests/
+│   │   │   └── test.sh
+│   │   └── solution/
+│   │       └── solve.sh
+│   └── step-two/
+│       ├── instruction.md
+│       └── ...
+└── tests/
+    └── test.sh         # shared test helpers / fallback test script
+```
+
+The `environment/` directory lives at the task root — the container is built once and shared across all steps. An optional top-level `tests/` directory provides shared test helpers; step-level test files are uploaded afterward and override same-named files, so each step's own `test.sh` takes priority.
+
+## Configuring steps in task.toml
+
+Declare steps using `[[steps]]` array-of-tables entries. Execution order follows declaration order.
+
+```toml
+schema_version = "1.3"
+
+[task]
+name = "harbor/example-multi-step"
+description = "A three-step example task"
+
+multi_step_reward_strategy = "mean"
+
+[environment]
+build_timeout_sec = 600.0
+
+[[steps]]
+name = "scaffold"
+min_reward = 1.0
+
+[steps.agent]
+timeout_sec = 60.0
+
+[steps.verifier]
+timeout_sec = 30.0
+
+[[steps]]
+name = "implement"
+min_reward = 0.5
+
+[steps.agent]
+timeout_sec = 120.0
+
+[steps.verifier]
+timeout_sec = 30.0
+
+[[steps]]
+name = "document"
+
+[steps.agent]
+timeout_sec = 60.0
+
+[steps.verifier]
+timeout_sec = 30.0
+```
+
+### Step fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `string` | — | Step identifier; must match the sub-directory name under `steps/` |
+| `agent.timeout_sec` | `float \| null` | `null` | Per-step agent timeout; overrides the task-level value |
+| `agent.user` | `string \| int \| null` | `null` | User to run the agent as for this step |
+| `verifier.timeout_sec` | `float \| null` | `null` | Per-step verifier timeout; overrides the task-level value |
+| `verifier.env` | `dict[str, str]` | `{}` | Environment variables scoped to this step's verifier run |
+| `verifier.user` | `string \| int \| null` | `null` | User to run the verifier as for this step |
+| `verifier.environment_mode` | `"shared" \| "separate" \| null` | `null` | Overrides the trial-level verifier mode for this step |
+| `verifier.environment` | `EnvironmentConfig \| null` | `null` | Dedicated verifier container for this step |
+| `min_reward` | `float \| dict[str, float] \| null` | `null` | Abort the trial if this step's reward falls below the threshold |
+| `artifacts` | `list[str \| ArtifactConfig]` | `[]` | Paths to snapshot after this step's verification |
+
+## The workdir/ directory
+
+Files placed under `steps/{name}/workdir/` are uploaded to the container's working directory before the agent runs for that step. Use this to stage step-specific fixtures, configs, or seed data.
+
+<Note>
+  The container filesystem is shared across all steps. Files left in the working directory by step N are visible to step N+1 — including to that step's agent and verifier. If step N's `workdir/` upload would overwrite files from an earlier step, use non-colliding filenames or have an earlier step's `setup.sh` rename or preserve state.
+</Note>
+
+### workdir/setup.sh
+
+If `steps/{name}/workdir/setup.sh` exists, Harbor executes it after uploading the `workdir/` contents and before starting the agent. Use it for per-step preparation the agent should not have to do itself: seeding a database, installing a one-off dependency, or resetting file permissions.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Seed the database with step-specific fixtures
+psql -U postgres -d app -f /app/fixtures.sql
+
+# Remove this script so the agent doesn't see it
+rm -- "$0"
+```
+
+A non-zero exit from `setup.sh` aborts the step and the entire trial — the agent and verifier do not run for that step.
+
+## Early stopping with min_reward
+
+`min_reward` lets you abort a trial early when a step's result falls below a threshold. Two shapes are supported:
+
+- **Scalar** — `min_reward = 1.0` gates on the `"reward"` key (the value written by `reward.txt`).
+- **Dict** — `min_reward = { correctness = 0.8, style = 0.5 }` gates on each declared key; the trial aborts if any key is below its threshold or missing.
+
+```toml
+[[steps]]
+name = "scaffold"
+min_reward = 1.0   # abort if the scaffold isn't perfect — later steps depend on it
+
+[[steps]]
+name = "implement"
+min_reward = { correctness = 0.5, tests_pass = 1.0 }
+```
+
+<Warning>
+  A missing verifier result (verifier crash) or a missing gated key is treated as `-inf` and always triggers an abort. When `verifier.disable` is set at the trial level, `min_reward` is ignored.
+</Warning>
+
+## Aggregating rewards: multi_step_reward_strategy
+
+After all steps complete, Harbor derives a single trial-level reward. Set `multi_step_reward_strategy` at the task root to control how:
+
+| Strategy | Behavior |
+|---|---|
+| `"mean"` (default) | Per-key means across steps. Missing keys contribute `0`; steps without a verifier result are excluded from the denominator. |
+| `"final"` | The last step's `verifier_result` is used verbatim. Preserves multi-dim reward dicts but discards every earlier step's signal. |
+
+```toml
+multi_step_reward_strategy = "final"
+```
+
+Use `"final"` when your last step is an end-to-end verifier whose reward dict already represents the full-task signal.
+
+<Info>
+  If a step's `min_reward` triggers an abort, `"final"` uses the **aborted step's** result, not the step you designed as the final one. Keep this in mind when combining `min_reward` with `"final"` strategy.
+</Info>
+
+## Per-step verifier environments
+
+Each step can override the trial-level verifier mode under `[steps.verifier]`. Mixed shared/separate configurations are supported within a single task — for example, an early build step using the shared agent environment for fast feedback, and a final grading step using a locked-down separate image:
+
+```toml
+[[steps]]
+name = "build"
+# Inherits the trial-level mode (shared by default).
+
+[[steps]]
+name = "grade"
+
+[steps.verifier.environment]
+docker_image = "my-org/grading-image:latest"
+```
+
+Step-level resolution rules:
+1. `[steps.verifier].environment_mode` wins when set explicitly.
+2. `[steps.verifier.environment]` present with mode omitted implies `"separate"`.
+3. Otherwise the step inherits the trial-level resolution.
+
+## Collecting artifacts per step
+
+Artifacts are snapshotted once per step into `steps/{name}/artifacts/` after verification. The paths collected at each step are the concatenation of:
+
+1. Task-level `artifacts` (declared at the `task.toml` root)
+2. Trial-level `artifacts` (passed via `TrialConfig`)
+3. Step-level `steps[].artifacts`
+
+```toml
+# Snapshotted after every step
+artifacts = ["/app/greet.sh"]
+
+[[steps]]
+name = "document"
+# Only collected during the document step
+artifacts = ["/app/README.md"]
+```
+
+## Full example
+
+A complete worked example is available at [`examples/tasks/hello-multi-step-advanced/`](https://github.com/harbor-framework/harbor/tree/main/examples/tasks/hello-multi-step-advanced) in the Harbor repository. It demonstrates per-step instructions, `workdir/` uploads, per-step verifier environment variables, per-step healthchecks, `min_reward` early-stopping, and step-level artifact collection.

@@ -1,47 +1,105 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Harbor in Under 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install Harbor, run your first agent evaluation on Terminal-Bench, and view results — all in under 5 minutes with a single CLI command."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+Harbor gets you from zero to a running agent evaluation in a handful of commands. This guide walks you through installing the package, exploring available datasets, launching your first eval, and viewing the results. You need Python 3.10 or later and a running Docker daemon before you begin.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install Harbor">
+    Install Harbor globally using `uv tool install` (recommended) or `pip install`. Using `uv` ensures Harbor's dependencies are isolated from your project environment.
+
+    <CodeGroup>
+      ```bash uv
+      uv tool install harbor
+      ```
+
+      ```bash pip
+      pip install harbor
+      ```
+    </CodeGroup>
+
+    Verify the installation by checking the version:
 
     ```bash
-    npm install your-package
+    harbor --help
     ```
+
+    You should see the full list of available Harbor commands printed to your terminal.
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="List available datasets">
+    Harbor ships with a registry of popular benchmarks. Run the following command to see every dataset that Harbor can download and run automatically:
 
     ```bash
-    your-cli init
+    harbor dataset list
     ```
+
+    The output lists dataset identifiers in `org/name` format — for example, `terminal-bench/terminal-bench-2`. You will use this identifier in the next step.
+
+    <Tip>
+      You can also run evaluations against a local directory of tasks using the `-p` flag instead of `-d`. See the [Tasks](/tasks/overview) documentation for the expected directory layout.
+    </Tip>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Run your first eval">
+    Use `harbor run` to evaluate an agent and model against a dataset. Pass the dataset identifier with `-d`, your model with `-m`, and your agent with `-a`:
 
     ```bash
-    your-cli start
+    harbor run -d terminal-bench/terminal-bench-2 -m "<model>" -a "<agent>"
     ```
+
+    For example, to evaluate Terminus-2 with `openai/o3` on Terminal-Bench:
+
+    ```bash
+    harbor run -d terminal-bench/terminal-bench-2 -m "openai/o3" -a "terminus-2"
+    ```
+
+    Harbor automatically downloads the dataset, builds or pulls the required Docker images, and runs each task as an isolated trial. Supported agents include:
+
+    | Agent flag | Description |
+    |---|---|
+    | `terminus-2` | Harbor's native terminal agent |
+    | `claude-code` | Anthropic Claude Code |
+    | `codex` | OpenAI Codex CLI |
+    | `gemini` | Google Gemini CLI |
+    | `openhands` | OpenHands generalist agent |
+
+    <Note>
+      For large datasets or long-running agents, consider scaling horizontally with a cloud sandbox provider. Add `--env daytona -n 32` to run 32 trials concurrently on Daytona instead of your local machine. See the [cloud sandboxes](#scaling-with-cloud-sandboxes) note below for more detail.
+    </Note>
+  </Step>
+
+  <Step title="View results">
+    Once the job completes, inspect the trial rewards and aggregate scores:
+
+    ```bash
+    harbor view jobs
+    ```
+
+    This command lists all past jobs with their overall score. Select a job to drill down into per-trial rewards, agent logs, and environment output.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Scaling with cloud sandboxes
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Running evals locally is fine for small datasets, but agent trials are slow — each one can require many back-and-forth turns, and each command adds latency. Once you move to API-hosted models, trials become I/O-bound rather than compute-bound, which means you can safely run far more trials in parallel than you have CPU cores.
+
+To scale out using Daytona, add the `--env` and `-n` flags to your `harbor run` command:
+
+```bash
+harbor run -d terminal-bench/terminal-bench-2 -m "openai/o3" -a "terminus-2" --env daytona -n 32
+```
+
+This runs 32 trials concurrently on Daytona sandboxes instead of your local Docker daemon. Harbor supports many other providers including Modal, E2B, Runloop, Tensorlake, Blaxel, EC2, and Beam.
+
+<Info>
+  See the [Introduction](/introduction) for the full list of supported cloud sandbox providers and configuration details.
+</Info>
+
+## Next steps
+
+- Learn how each piece fits together in [Core Concepts](/core-concepts).
+- Define your own evaluation tasks in [Tasks](/tasks/overview).
+- Explore the full agent catalogue in [Agents](/agents/overview).

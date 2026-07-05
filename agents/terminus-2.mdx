@@ -1,0 +1,231 @@
+---
+title: "Terminus-2: Harbor's Built-In Coding Agent"
+sidebarTitle: "Terminus-2"
+description: "Terminus-2 is Harbor's native coding agent, optimized for agentic evals and RL training. Configure models, prompt templates, trajectory settings, and more."
+---
+
+Terminus-2 is Harbor's reference agent implementation — a research-preview coding agent that operates entirely autonomously inside sandboxed container environments. It uses a single interactive tmux session as its only tool, which lets it send keystrokes, scroll output, navigate menus, and launch additional shells, all without needing specialized tools for each interaction pattern. Its logic runs in a separate Python process from the Docker container, so it can connect to arbitrary remote environments while keeping agent code cleanly isolated from the task environment.
+
+<Note>
+  Terminus-2 will never ask for user input during task execution. It is designed to complete tasks end-to-end without human guidance. Only run it inside sandboxed environments.
+</Note>
+
+## Basic Usage
+
+Run Terminus-2 by passing `--agent terminus-2` to `harbor run`:
+
+```bash
+harbor run \
+  --agent terminus-2 \
+  --model openai/gpt-5 \
+  --path examples/tasks/ \
+  --task-name hello-world
+```
+
+## Configuration Options
+
+Pass configuration to Terminus-2 through `AgentConfig.kwargs`:
+
+```python
+from harbor.models.trial.config import AgentConfig
+from harbor.models.agent_name import AgentName
+
+agent_config = AgentConfig(
+    name=AgentName.TERMINUS_2,
+    model_name="openai/gpt-5",
+    kwargs={
+        # Parser configuration
+        "parser_name": "json",          # "json" or "xml" (default: "json")
+
+        # API configuration
+        "api_base": "https://your-vllm-server.com",  # Custom API endpoint
+        "temperature": 0.7,             # Sampling temperature (default: 0.7)
+
+        # Episode/turn limits
+        "max_turns": 100,               # Maximum number of turns (default: 1000000)
+
+        # Summarization configuration
+        "enable_summarize": True,       # Enable context summarization (default: True)
+        "proactive_summarization_threshold": 8000,  # Free-token threshold (default: 8000)
+
+        # RL training configuration
+        "collect_rollout_details": False,  # Collect token IDs and logprobs (default: False)
+
+        # Advanced model configuration
+        "reasoning_effort": "medium",   # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "default"
+        "max_thinking_tokens": 2048,    # Anthropic extended thinking (minimum: 1024)
+
+        # Register custom model info with LiteLLM for metrics and summarization
+        "model_info": {
+            "max_input_tokens": 128000,
+            "max_output_tokens": 4096,
+            "input_cost_per_token": 0.000003,
+            "output_cost_per_token": 0.000015,
+        },
+
+        # Session tracking
+        "session_id": "custom-session-id",  # (default: auto-generated UUID)
+    }
+)
+```
+
+<Tip>
+  If you are using a custom or uncommon model that LiteLLM does not recognise, supply `model_info` so that metrics tracking and context summarization work correctly. Follow the [LiteLLM `register_model` docs](https://docs.litellm.ai/docs/completion/token_usage#9-register_model) for the expected shape.
+</Tip>
+
+## Conversation History Management
+
+Long-running tasks can exhaust a model's context window. Terminus-2 handles this automatically through two complementary summarization strategies.
+
+### Proactive Summarization
+
+When the number of free tokens (max input tokens minus current context length) drops below `proactive_summarization_threshold` (default: 8,000), Terminus-2 pauses, compresses the conversation history through a three-step subagent process, and then resumes with the condensed context.
+
+The three-step process works as follows:
+
+<Steps>
+  <Step title="Summary Subagent">
+    Receives the full previous conversation history and produces an initial summary.
+  </Step>
+  <Step title="Question Subagent">
+    Receives only the summary and generates clarifying questions about any missing critical information.
+  </Step>
+  <Step title="Answer Subagent">
+    Receives the previous history, the summary, and the questions, then answers them to fill the gaps.
+  </Step>
+</Steps>
+
+The main agent then continues with a compressed context containing the system prompt, task description, summary, questions, and answers.
+
+### Passive Summarization (Context Length Recovery)
+
+When a `ContextLengthExceededError` occurs, Terminus-2 uses a four-level fallback cascade to recover and keep running:
+
+<Steps>
+  <Step title="Unwind">
+    Removes recent message pairs from the end of the conversation until enough free tokens are available for summarization. Always keeps at least the first message.
+  </Step>
+  <Step title="Standard Summarization">
+    Runs the three-step subagent process on the unwound history. On success, replaces the removed messages with the summary and Q&A.
+  </Step>
+  <Step title="Fallback Summary">
+    If standard summarization fails, attempts a simpler summary using only the system prompt, task description, and current terminal state.
+  </Step>
+  <Step title="Ultimate Fallback">
+    If the fallback summary also fails, continues execution with only the system prompt, task description, and current state — no summary at all.
+  </Step>
+</Steps>
+
+Enable summarization with `enable_summarize=True` in your agent config (it is on by default).
+
+## Trajectory Configuration
+
+Terminus-2 generates trajectories automatically in the [Agent Trajectory Interchange Format (ATIF)](/agents/trajectory-format). You control how those trajectories are recorded using `TrajectoryConfig`.
+
+```python
+from harbor.agents.terminus_2 import Terminus2
+from harbor.models.agent.trajectory_config import TrajectoryConfig
+from pathlib import Path
+
+agent = Terminus2(
+    logs_dir=Path("logs"),
+    model_name="anthropic/claude-3-5-sonnet-20241022",
+    trajectory_config=TrajectoryConfig(
+        raw_content=True,    # Preserve exact LLM responses
+        linear_history=True  # Split on summarization for clean sequences
+    )
+)
+```
+
+### `raw_content`
+
+Controls whether the trajectory stores raw LLM output or parsed structured data.
+
+| Value | Behaviour | Best For |
+|---|---|---|
+| `False` (default) | Saves parsed, structured data with separate `message` and `tool_calls` fields | Analysis and debugging |
+| `True` | Saves the exact raw LLM response in the `message` field without parsing | SFT data export |
+
+### `linear_history`
+
+Controls how trajectories are split when context summarization occurs. The key question is whether you need to recover the exact LLM conversation history from the files.
+
+**`linear_history=False` (default):** All main-agent steps are stored in a single `trajectory.json`. Summarization subagents get their own files. This gives you one readable file, but the handoff prompt after summarization appears to continue the previous conversation — the LLM context was actually reset, and you cannot tell that from the single file alone.
+
+```
+trajectory.json                              # All main agent steps
+trajectory.summarization-1-summary.json
+trajectory.summarization-1-questions.json
+trajectory.summarization-1-answers.json
+```
+
+**`linear_history=True`:** The trajectory is split into separate files each time summarization occurs. Each file is a continuous, unambiguous linear history that exactly matches what was sent to the LLM.
+
+```
+trajectory.json          # Steps before first summarization
+trajectory.cont-1.json   # Steps after first summarization
+trajectory.cont-2.json   # Steps after second summarization (if any)
+trajectory.summarization-1-summary.json
+trajectory.summarization-1-questions.json
+trajectory.summarization-1-answers.json
+```
+
+### Recommended Configurations
+
+<Tabs>
+  <Tab title="Debugging & Analysis">
+    ```python
+    TrajectoryConfig(
+        raw_content=False,   # Structured, parsed data
+        linear_history=False # Single file, easy to navigate
+    )
+    ```
+  </Tab>
+  <Tab title="SFT Data Export">
+    ```python
+    TrajectoryConfig(
+        raw_content=True,    # Exact model outputs
+        linear_history=True  # Clean, unambiguous input/output sequences
+    )
+    ```
+  </Tab>
+  <Tab title="RL Training">
+    ```python
+    TrajectoryConfig(
+        raw_content=False,   # Structured helps debugging (token IDs are always exact)
+        linear_history=False # Full episode in one file
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Token Collection for RL Training
+
+Set `collect_rollout_details=True` in your agent config to have Terminus-2 capture per-turn token IDs and log probabilities during execution. These are stored in the agent result metadata:
+
+```python
+# First RolloutDetail contains the main agent conversation
+rollout_detail = trial_result.agent_result.metadata["rollout_details"][0]
+
+# Access turn-by-turn data
+prompt_token_ids     = rollout_detail["prompt_token_ids"]      # List[List[int]]
+completion_token_ids = rollout_detail["completion_token_ids"]  # List[List[int]]
+logprobs             = rollout_detail["logprobs"]              # List[List[float]]
+```
+
+Access rewards from the verifier:
+
+```python
+reward = trial_result.verifier_result.rewards.get("reward", 0)
+```
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Agents Overview" icon="list" href="/agents/overview">
+    General guide to using built-in agents and integrating your own.
+  </Card>
+  <Card title="Trajectory Format" icon="file-code" href="/agents/trajectory-format">
+    Full ATIF specification and how to work with trajectory files.
+  </Card>
+</CardGroup>

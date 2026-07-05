@@ -1,0 +1,155 @@
+---
+title: "Controlling Network Access in Harbor Tasks"
+sidebarTitle: "Network Policy"
+description: "Configure network access for your Harbor tasks with baselines, phase overrides, and run-time host allowlists for the agent and verifier environments."
+---
+
+Harbor gives you fine-grained control over what network access the agent and verifier have at each phase of a run. You can lock down the environment entirely, allow only specific hosts, or restrict access only during the agent phase while keeping setup unrestricted. This is useful for security hardening and preventing reward hacking through unexpected external calls.
+
+## Network modes
+
+Harbor supports three network modes:
+
+| Mode | Description |
+|---|---|
+| `public` | Full unrestricted network access (default when `network_mode` is omitted) |
+| `no-network` | All outbound and inbound network traffic is blocked |
+| `allowlist` | Only traffic to hosts listed in `allowed_hosts` is permitted; an empty or omitted `allowed_hosts` denies all egress |
+
+Not every provider supports every mode. If your task requests a mode the selected provider does not support, Harbor rejects the trial at validation time rather than running with a weaker policy.
+
+## Baselines, phase overrides, and run-time merges
+
+Network policy is applied in three layers:
+
+1. **Baseline** — set when the environment starts; restored between phases. Configured via `[environment].network_mode`.
+2. **Phase override** — applied only during `agent.run()` or `verifier.verify()`. Requires the provider to support `dynamic_network_policy`. Configured via `[agent].network_mode` and `[verifier].network_mode`.
+3. **Run-time merge** — added via CLI flags at job launch; merged into the environment or agent allowlist.
+
+The table below shows every field, its layer, and when it applies:
+
+| Field | Layer | Applied when |
+|---|---|---|
+| `[environment].network_mode` | Baseline | Agent env start; shared verifier baseline |
+| `[verifier.environment].network_mode` | Baseline | Separate verifier env start |
+| `[steps.verifier.environment].network_mode` | Baseline | Per-step separate verifier env start |
+| `[agent].network_mode`, `[steps.agent].network_mode` | Override | During matching `agent.run()` |
+| `[verifier].network_mode`, `[steps.verifier].network_mode` | Override | During matching `verify()` |
+| `--allow-environment-host` | Run-time | Merged into `environment.extra_allowed_hosts` → `[environment]` baseline |
+| `--allow-agent-host` | Run-time | Merged into `agent.extra_allowed_hosts` → agent phase allowlist |
+
+The verifier baseline follows the environment mode you selected: **shared** → uses `[environment]`; **separate** → uses `[verifier.environment]` if set, otherwise a copy of `[environment]`.
+
+## Example: common configurations
+
+<Tabs>
+  <Tab title="No network">
+    Block all network access for the entire run:
+
+    ```toml
+    [environment]
+    network_mode = "no-network"
+    ```
+  </Tab>
+  <Tab title="Allowlist during agent phase">
+    Allow full access at startup (so dependencies can install), then restrict the agent to a specific allowlist:
+
+    ```toml
+    [environment]
+    network_mode = "public"
+
+    [agent]
+    network_mode = "allowlist"
+    allowed_hosts = ["pypi.org", "api.openai.com"]
+
+    [verifier]
+    network_mode = "no-network"
+    ```
+  </Tab>
+  <Tab title="Separate verifier environment">
+    Use a dedicated grading container with its own network policy:
+
+    ```toml
+    [environment]
+    network_mode = "no-network"
+
+    [verifier]
+    environment_mode = "separate"
+
+    [verifier.environment]
+    docker_image = "my-org/grading-image:latest"
+    network_mode = "allowlist"
+    allowed_hosts = ["api.grading-service.com"]
+    ```
+  </Tab>
+</Tabs>
+
+## Hostname syntax for allowlists
+
+`allowed_hosts` entries accept:
+
+- **Exact hostnames** — `pypi.org` allows only `pypi.org`, not `www.pypi.org`.
+- **IPv4 / IPv6 address literals** — `192.168.1.1` (provider support varies).
+- **Leading wildcard patterns** — `*.example.com` allows all subdomains of `example.com` (provider support varies).
+
+<Warning>
+  `allowed_hosts` entries are not URLs. Do not include protocols (`https://`), ports (`:443`), paths, or bracketed IPv6 addresses. Those formats are rejected.
+</Warning>
+
+Wildcard apex behavior is provider-dependent. For maximum portability, include both the apex and the wildcard when you need both:
+
+```toml
+[agent]
+network_mode = "allowlist"
+allowed_hosts = ["example.com", "*.example.com"]
+```
+
+## CLI flags for run-time host merging
+
+You can extend the allowlist at run time without editing `task.toml`:
+
+```bash
+# Allow a host during environment setup (e.g., to pull a dependency)
+harbor run -p my-task -a terminus-2 --allow-environment-host apt.example.com
+
+# Allow a host only during the agent phase
+harbor run -p my-task -a terminus-2 --allow-agent-host pypi.org
+```
+
+<Note>
+  On a `public` baseline, run-time host flags emit a warning and are ignored — there is nothing to extend when all traffic is already permitted.
+</Note>
+
+## Why use phase overrides?
+
+Phase overrides let you enforce different policies at different points in the run without requiring the provider to rebuild the environment. A common pattern: allow network access during environment setup so that agents can install tools like Claude Code, then switch to `allowlist` or `no-network` during `agent.run()` so the agent can only reach the specific endpoints the task permits.
+
+```toml
+[environment]
+network_mode = "public"   # agent setup can fetch tooling
+
+[agent]
+network_mode = "allowlist"
+allowed_hosts = ["api.anthropic.com"]   # only Anthropic's API during the run
+```
+
+<Info>
+  Phase overrides require the selected provider to declare the `dynamic_network_policy` capability. If the provider does not support dynamic switching, Harbor rejects the task at validation time. Use `verifier.environment_mode = "separate"` as an alternative when you need a different verifier baseline without runtime switching.
+</Info>
+
+## Multi-step tasks
+
+All network fields can be specified at the step level as well. Step-level `[steps.agent]` and `[steps.verifier]` overrides follow the same baseline/override rules as the top-level fields. See [Multi-Step Tasks](/tasks/multi-step) for details.
+
+## Provider support matrix
+
+| Capability | Supported providers |
+|---|---|
+| `no-network` | `docker`¹, `daytona`, `e2b`, `langsmith`, `tensorlake`, `cwsandbox`, `wandb`, `runloop`, `modal`², `gke`³, `ec2`, `novita`, `islo`, `blaxel`, `beam` |
+| `allowlist` | `docker`¹, `daytona`², `e2b`, `islo`, `runloop`, `modal`², `novita`², `blaxel`², `beam`⁴ |
+| `dynamic_network_policy` | `docker`¹, `daytona`², `e2b`, `islo`, `modal`², `beam`⁴ |
+
+¹ Requires Linux containers and local kernel support for nftables (`CONFIG_NFT_FIB_INET`). Windows containers do not support these modes.  
+² Single-container tasks only (not in Docker Compose mode).  
+³ Docker Compose (multi-container) tasks only.  
+⁴ Beam resolves hostnames to IP CIDRs; wildcard host entries are not supported.

@@ -1,0 +1,78 @@
+---
+title: "Harbor: Containerized AI Agent Evaluation Framework"
+sidebarTitle: "Introduction"
+description: "Harbor simplifies running AI agent evaluations in Docker containers. Benchmark agents on Terminal-Bench, SWE-Bench, and custom tasks at any scale."
+---
+
+Harbor is a Python framework for evaluating and optimizing AI agents in containerized environments. It gives you a single, consistent interface for defining tasks, wiring up agents, and running evaluations — whether you are benchmarking a model on Terminal-Bench, generating supervised fine-tuning traces, or running reinforcement learning loops. Harbor handles the container lifecycle, parallel scheduling, and result collection so you can focus on the agents and tasks themselves.
+
+## Why Harbor?
+
+Running agent evaluations in containers is harder than it looks. You need to manage Docker images, coordinate parallel trials, collect rewards, and integrate with cloud sandbox providers when local compute runs out. Harbor was built specifically to solve these problems after the release of Terminal-Bench revealed that teams were spending more time on evaluation infrastructure than on agents.
+
+Harbor gives you:
+
+- **Simple, modular interfaces** for environments, agents, and tasks — swap any component without touching the rest of your setup.
+- **Pre-integrated agents** so you can start evaluating immediately without writing boilerplate.
+- **A dataset registry** with popular benchmarks ready to download and run in one command.
+- **Cloud sandbox integrations** for horizontal scaling when local Docker is not enough.
+- **Post-training tooling** to generate SFT traces and run RL optimization directly from evaluation rollouts.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Run evals" icon="play" href="/run-jobs/evals">
+    Execute evaluations against any registered or local dataset using a single `harbor run` command.
+  </Card>
+  <Card title="Scale with cloud sandboxes" icon="cloud" href="/run-jobs/evals">
+    Offload container execution to Daytona, Modal, E2B, Runloop, Tensorlake, Blaxel, EC2, Beam, and more for massive parallelism.
+  </Card>
+  <Card title="Build custom tasks" icon="hammer" href="/tasks/overview">
+    Define tasks as directories with an instruction, a Dockerfile, and a test script — then publish them to the Harbor registry.
+  </Card>
+  <Card title="RewardKit" icon="star" href="/rewardkit/overview">
+    Write reward functions that score agent output and plug directly into optimization pipelines.
+  </Card>
+  <Card title="Train with RL and SFT" icon="brain" href="/run-jobs/evals">
+    Use rollouts from Harbor jobs as training signal for reinforcement learning or supervised fine-tuning via SkyRL and GEPA integrations.
+  </Card>
+  <Card title="Harbor Hub" icon="warehouse" href="/datasets/overview">
+    Browse and publish tasks and datasets to the shared Harbor registry, backed by the community.
+  </Card>
+</CardGroup>
+
+## Supported agents
+
+Harbor comes with pre-integrated support for the most widely used CLI agents so you can start benchmarking without any extra setup:
+
+- **Terminus-2** — Harbor's own high-performance terminal agent
+- **Claude Code** — Anthropic's agentic coding assistant
+- **Gemini CLI** — Google's command-line agent
+- **Codex CLI** — OpenAI's terminal coding agent
+- **OpenHands** — the open-source generalist agent from All-Hands AI
+
+You can also integrate any custom agent by implementing the `BaseAgent` or `BaseInstalledAgent` interface. See the [Agents](/agents/overview) documentation for details.
+
+## Supported cloud providers
+
+When local Docker is not fast enough, Harbor can distribute trials across any of the following cloud sandbox providers:
+
+| Provider | Notes |
+|---|---|
+| Daytona | Recommended for high-concurrency runs |
+| Modal | Serverless GPU and CPU containers |
+| E2B | Lightweight sandboxes for coding agents |
+| Runloop | Managed container sandboxes |
+| Tensorlake | Native Harbor integration |
+| LangSmith | LangChain's observability-enabled sandboxes |
+| Blaxel | Edge-optimized container runtime |
+| EC2 | Self-managed AWS instances |
+| Beam | Serverless cloud compute |
+
+<Note>
+  Cloud sandboxes turn agent trials from compute-bound to I/O-bound workloads, which means you can safely run dozens or hundreds of trials concurrently. We strongly recommend using a cloud provider for any serious benchmarking effort.
+</Note>
+
+## Next steps
+
+Ready to try it yourself? Head to the [Quickstart](/quickstart) to install Harbor and run your first evaluation in under five minutes.

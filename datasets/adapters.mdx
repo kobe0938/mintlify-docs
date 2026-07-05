@@ -1,0 +1,392 @@
+---
+title: "Dataset Adapters for Harbor"
+sidebarTitle: "Adapters"
+description: "Use Harbor dataset adapters to convert existing benchmark formats (HuggingFace datasets, JSON files, and more) into the Harbor task format automatically."
+---
+
+A Harbor adapter translates an existing benchmark into Harbor's task format. Instead of manually recreating every task, you write adapter code that reads the original benchmark's data and generates a valid Harbor task directory for each item — complete with `task.toml`, `instruction.md`, a Dockerfile, an oracle solution, and a test script.
+
+<Note>
+  **Need help or want to contribute?**
+
+  Join the [Discord](https://discord.com/invite/6xWPKhGDbA) (`#adapters-announcements`) and reach out to [Lin Shi](mailto:ls2282@cornell.edu). Check the [Adapter List](https://docs.google.com/spreadsheets/d/1mJbiASPm32DDNzEnV6eDGwpEf3FlMUe5dhkZmFjjSoo/edit?gid=0#gid=0) to see what benchmarks are already available. The team covers API costs for parity experiments.
+</Note>
+
+## Quick start
+
+```bash
+# List available datasets
+harbor dataset list
+
+# Scaffold a new adapter interactively
+harbor adapter init
+
+# Or non-interactively with arguments
+harbor adapter init my-adapter --name "My Name"
+```
+
+## Steps at a glance
+
+| # | Step | Goal |
+|---|------|------|
+| 1 | [Understand the benchmark](#1-understand-the-original-benchmark) | Identify instructions, environments, tests, and solutions |
+| 2 | [Complete adapter code](#2-complete-the-adapter-code) | Generate valid Harbor task directories from the upstream benchmark |
+| 3 | [Verify oracle solutions](#3-verify-oracle-solutions) | All oracle solutions pass at 100% reward |
+| 4 | [Plan parity & implement agents](#4-plan-parity--implement-agents) | Coordinate with the team; set up agents on both sides |
+| 5 | [Run parity experiments](#5-run-parity-experiments) | Compare Harbor vs. original benchmark scores |
+| 6 | [Record parity results](#6-record-parity-results) | Save results to `parity_experiment.json` |
+| 7 | [Upload results](#7-upload-results) | Push to HuggingFace parity dataset |
+| 8 | [Register the dataset](#8-register-the-dataset) | Prepare `dataset.toml` and submit for publishing |
+| 9 | [Document & submit](#9-document--submit) | Write README and open a review PR |
+
+---
+
+## 1. Understand the original benchmark
+
+Before writing any code, study the upstream benchmark and identify four components for every task:
+
+| Component | What to find |
+|-----------|-------------|
+| **Instructions** | How tasks are described and what information agents receive |
+| **Environments** | Docker setup, system dependencies, and file structures |
+| **Tests** | Evaluation method: unit tests, LLM-as-a-Judge, and so on |
+| **Solutions** | Oracle or reference solutions; if absent, whether LLM generation is feasible |
+
+---
+
+## 2. Complete the adapter code
+
+### Fork and branch
+
+```bash
+git clone https://github.com/{your-github-username}/harbor.git
+cd harbor
+git checkout -b {your-adapter-name}-adapter
+```
+
+### Scaffold the adapter
+
+Run `harbor adapter init` to generate the package structure under `harbor/adapters/{adapter-name}/`:
+
+```
+adapters/{adapter-name}/
+├── pyproject.toml
+├── README.md
+├── adapter_metadata.json
+├── parity_experiment.json
+├── run_{adapter-name}.yaml
+└── src/{adapter_name}/
+    ├── __init__.py
+    ├── adapter.py
+    ├── main.py
+    └── task-template/
+        ├── task.toml
+        ├── instruction.md
+        ├── environment/
+        │   └── Dockerfile
+        ├── solution/
+        │   └── solve.sh
+        └── tests/
+            └── test.sh
+```
+
+### Fill in adapter code
+
+Complete `adapter.py` and `main.py` so that running the adapter produces a valid task directory for each benchmark task. Each generated task must follow this structure:
+
+```
+<adapter-name>/
+└── <task-id>/
+    ├── task.toml
+    ├── instruction.md
+    ├── environment/
+    │   └── Dockerfile
+    ├── solution/
+    │   └── solve.sh
+    └── tests/
+        ├── test.sh
+        └── test_*.py    # optional
+```
+
+Run the adapter with:
+
+```bash
+uv run python -m {adapter_name}.main --output-dir <path>
+```
+
+`main.py` must support `--output-dir`, `--limit`, `--overwrite`, and `--task-ids` flags.
+
+### Key task file requirements
+
+**`task.toml`** — every task must contain a `name` field for registry identification. The `version` field must remain `"1.0"`.
+
+```toml
+version = "1.0"
+
+[task]
+name = "my-benchmark/task-001"
+
+[metadata]
+author_name = "Original benchmark authors"
+author_email = "benchmark-authors@email.com"
+difficulty = "medium"
+category = "programming"
+tags = ["debugging", "python"]
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 120.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+```
+
+**`tests/test.sh`** — must write a numeric reward (0 to 1) to `/logs/verifier/reward.txt`:
+
+```bash
+#!/bin/bash
+pytest /tests/test_*.py
+if [ $? -eq 0 ]; then
+  echo 1 > /logs/verifier/reward.txt
+else
+  echo 0 > /logs/verifier/reward.txt
+fi
+```
+
+**`instruction.md`** — write agent-actionable instructions. Include the goal, constraints, expected output location, and any files the agent should modify. Do not include test answers or oracle solutions.
+
+**`environment/Dockerfile`** — set up the container the agent and verifier will run inside:
+
+```dockerfile
+FROM python:3.13-slim
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install benchmark-specific dependencies
+# RUN pip install --no-cache-dir <packages>
+
+# Copy task-specific files
+# COPY . /workspace/
+```
+
+### Task naming rules
+
+| Rule | Requirement |
+|------|-------------|
+| Format | `<org>/<task_name>`, for example `openai/task-001` |
+| Uniqueness | Names must be unique within the dataset and stable across adapter runs |
+| Sanitization | Lowercase; replace spaces, slashes, and special characters with hyphens |
+| Fallback | If the upstream benchmark lacks stable identifiers, use a deterministic scheme such as `{dataset}-1`, `{dataset}-2`, … |
+
+---
+
+## 3. Verify oracle solutions
+
+Run your adapter against the oracle agent and confirm **100% reward on all tasks**:
+
+```bash
+# Single task
+harbor trial start -p datasets/<adapter-name>/<task-id>
+
+# Entire dataset
+harbor run -p datasets/<adapter-name>
+
+# With a config file (recommended for reproducibility)
+harbor run -c adapters/<adapter-name>/<config>.yaml -a <agent> -m <model>
+```
+
+Once oracle passes at 100%, create a **WIP PR** titled `[WIP] Adapter: {adapter_name}` with a screenshot of the passing results.
+
+<Note>
+  If the original benchmark does not provide oracle solutions, build them with AI assistance. A recommended approach is to run a cheap agent over all tasks first, then use successful parity solutions to fill gaps with more powerful AI and human supervision.
+</Note>
+
+---
+
+## 4. Plan parity & implement agents
+
+Contact the team on [Discord](https://discord.com/invite/6xWPKhGDbA) **before** running parity experiments to agree on agents, models, run counts, and API key provisioning. Depending on your benchmark, you will encounter one of three agent scenarios:
+
+**Scenario 1 — Compatible agents exist.** The original benchmark already supports Harbor-compatible agents (OpenHands, Codex, Claude-Code, etc.). No extra work needed; run parity with identical settings on both sides.
+
+**Scenario 2 — LLM-based, no compatible agents.** Fork the original benchmark, implement a Harbor-compatible agent, and document it in the fork's README.
+
+**Scenario 3 — Custom agents.** Implement the custom agent under `adapters/{name}/` and also run experiments with standard agents (Codex, Claude-Code) to demonstrate the adapter generalizes.
+
+<Note>
+  **Large or expensive benchmarks**
+
+  For benchmarks where running the full set is too costly, run parity on a representative subset. Support `--split parity` in `main.py` to generate only the parity subset, and ask the team to publish it under the `parity` tag so users can run `-d {name}@parity`.
+</Note>
+
+---
+
+## 5. Run parity experiments
+
+Parity proves that your Harbor adaptation measures the same thing as the original benchmark. Run the **same agents, models, and settings** on both sides, multiple times each, and report results as **mean ± sample SEM** (standard error of the mean). The two sides match when their run-score ranges overlap:
+
+```
+max(harbor_runs) >= min(original_runs)  AND  max(original_runs) >= min(harbor_runs)
+```
+
+Run the Harbor side with:
+
+```bash
+harbor run -p datasets/<adapter-name> -a <agent> -m <model>
+```
+
+<Warning>
+  Complete runs symmetrically. The required order is: sanity check on 5–10 tasks (both sides) → one full run (both sides) → three full runs (both sides). Do not finish three runs on one side before starting the other, as an adaptation bug discovered late forces expensive re-runs.
+</Warning>
+
+---
+
+## 6. Record parity results
+
+Create `parity_experiment.json` in your adapter directory. Each entry covers one agent-and-model experiment:
+
+```json
+[
+  {
+    "adapter_name": "my-benchmark",
+    "agent": "codex@1.0",
+    "model": "gpt-5-2025-06-01",
+    "date": "2025-06-15",
+    "adapted_benchmark_size": 500,
+    "parity_benchmark_size": 500,
+    "number_of_runs": 3,
+    "notes": "None",
+    "original_parity_repo": "https://github.com/user/my-benchmark-fork",
+    "adapter_pr": ["https://github.com/harbor-framework/harbor/pull/123"],
+    "dataset_pr": ["https://github.com/laude-institute/harbor-datasets/pull/45"],
+    "parity_pr": ["https://huggingface.co/datasets/harborframework/parity-experiments/discussions/12"],
+    "metrics": [
+      {
+        "benchmark_name": "my-benchmark",
+        "metric": "pass@1",
+        "original": "45.2 ± 1.3",
+        "harbor": "44.8 ± 1.1",
+        "original_runs": [44.0, 45.5, 46.1],
+        "harbor_runs": [43.8, 45.0, 45.6]
+      }
+    ]
+  }
+]
+```
+
+Also include a summary table in your `README.md`. Report scores as `mean ± sample SEM`:
+
+```markdown
+| Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
+|-------|-------|--------|------|--------------|-----------------------|---------------------|
+| codex@1.0 | gpt-5 | pass@1 | 3 | 500 (100%) | 45.2 ± 1.3 | 44.8 ± 1.1 |
+```
+
+---
+
+## 7. Upload results
+
+Upload parity and oracle results to [harborframework/parity-experiments](https://huggingface.co/datasets/harborframework/parity-experiments) on HuggingFace. Use the [parity upload skill](https://github.com/harbor-framework/harbor/tree/main/skills/upload-parity-experiments) to automate this step.
+
+Required directory structure in the HuggingFace dataset:
+
+```
+adapters/{adapter_name}/
+├── README.md
+├── config.yaml
+├── original_parity/
+├── harbor_parity/
+├── oracle/
+└── results_collection/
+    ├── result_original_trial1.json
+    ├── result_harbor_trial1.json
+    └── ...
+```
+
+---
+
+## 8. Register the dataset
+
+Generate the dataset directory and store it in the [harbor-datasets GitHub repo](https://github.com/laude-institute/harbor-datasets) (or the [HuggingFace mirror](https://huggingface.co/datasets/harborframework/harbor-datasets) for large datasets):
+
+```bash
+git clone https://github.com/{your-github-username}/harbor-datasets.git
+cd harbor/adapters/<adapter-name>
+uv run python -m <adapter_name>.main --output-dir /path/to/harbor-datasets/datasets/<adapter-name>
+```
+
+Initialize `dataset.toml` once your tasks are finalized:
+
+```bash
+cd /path/to/harbor-datasets/datasets/<adapter-name>
+harbor init  # select "dataset"; enter the name as <org>/<dataset>
+```
+
+Verify the dataset runs locally before submitting:
+
+```bash
+harbor run -p /path/to/your/dataset
+```
+
+<Note>
+  Registry testing with `-d` is only available after publishing. Use `-p` for all pre-publish verification.
+</Note>
+
+Open a PR to `harbor-datasets` and request `@Slimshilin` for review. The Harbor team publishes the dataset to the registry after approval. Once published, confirm it works:
+
+```bash
+harbor run -d <organization-name>/<adapter-name>
+```
+
+### Versioning
+
+Dataset versions are publish-time tags, not fields in `dataset.toml`. Request a tag in your PR description (for example, `v1.0`). Every publish also receives `latest` automatically.
+
+| Tag | When to use |
+|-----|-------------|
+| `v1.0` | Default for the first release |
+| `v1.1`, `v2.0`, ... | Subsequent releases |
+| `parity` | Parity subset generated via `--split parity` |
+| `lite`, `verified` | Mirror upstream naming when the benchmark has named splits |
+
+---
+
+## 9. Document & submit
+
+Fill in the README generated by `harbor adapter init`. Cover:
+
+- Benchmark bugs discovered and how you handled them
+- Special treatments (prompt tweaks, environment adjustments)
+- Deviations from the original benchmark and the rationale
+- Agent implementation details if you added custom agents
+- Known limitations
+- Reproduction scripts for parity experiments on both sides
+
+When ready, update your PR title from `[WIP]` to `[Ready for Review]` and request review from `@Slimshilin`.
+
+---
+
+## Related docs
+
+<CardGroup cols={2}>
+  <Card title="Datasets overview" icon="database" href="/datasets/overview">
+    Understand dataset concepts and the three ways to use them.
+  </Card>
+  <Card title="Publishing" icon="upload" href="/datasets/publishing">
+    Publish your adapted dataset to the Harbor registry.
+  </Card>
+  <Card title="Custom metrics" icon="chart-bar" href="/datasets/metrics">
+    Add a custom metric script to your dataset.
+  </Card>
+  <Card title="Task format" icon="file-code" href="/tasks/overview">
+    Full specification for Harbor task directories.
+  </Card>
+</CardGroup>

@@ -1,0 +1,109 @@
+---
+title: "Harbor Tasks: Building Containerized Eval Environments"
+sidebarTitle: "Overview"
+description: "A Harbor task bundles an instruction, a Docker container environment, and a test script. Learn how tasks work and what files they require."
+---
+
+A Harbor task is the core unit of evaluation: it packages a natural-language instruction, a Docker container environment, and a test script into a single directory that any supported agent can run against. When you run a task, Harbor spins up the container, hands the agent the instruction, and then executes your test script to produce a numeric reward.
+
+## What a task contains
+
+Every Harbor task is made up of three things:
+
+- **Instruction** — a plain Markdown file (`instruction.md`) telling the agent what to accomplish.
+- **Environment** — a Docker container (defined by a `Dockerfile`, `docker-compose.yaml`, or a pre-built image) that the agent works inside.
+- **Tests** — a shell script (`tests/test.sh`) that runs after the agent finishes and writes a reward value to `/logs/verifier/reward.txt` or `/logs/verifier/reward.json`.
+
+Configuration and metadata for all three live in `task.toml`.
+
+## Task directory structure
+
+Running `harbor init` scaffolds the full directory layout for you:
+
+```
+my-task/
+├── instruction.md
+├── task.toml
+├── environment/
+│   ├── Dockerfile
+│   └── ...
+├── solution/
+│   └── solve.sh
+└── tests/
+    └── test.sh
+```
+
+| File / folder | Purpose |
+|---|---|
+| `instruction.md` | The task prompt shown to the agent |
+| `task.toml` | Configuration, metadata, timeouts, resource requirements |
+| `environment/` | Docker build context (Dockerfile, docker-compose.yaml, or any supporting files) |
+| `solution/` | Optional reference solution executed by the Oracle agent |
+| `tests/` | Verification scripts that produce the reward file |
+
+## Creating a task
+
+Use the `harbor init` command to generate a new task directory pre-populated with all required files:
+
+```bash
+harbor init --task "<org>/<name>"
+```
+
+Replace `<org>` with your organization or GitHub username and `<name>` with a short, descriptive slug. Harbor creates the directory, writes a starter `task.toml`, and stubs out `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`.
+
+<Tip>
+  You can also use a metadata template to pre-populate `task.toml` with your organization's defaults:
+
+  ```bash
+  harbor tasks init "<task-name>" --metadata-template task-template.toml
+  ```
+</Tip>
+
+## Running a task
+
+Evaluate any agent against your task with `harbor run`:
+
+```bash
+harbor run -p "<path/to/task>" -a "<agent>" -m "<model>"
+```
+
+| Flag | Description |
+|---|---|
+| `-p` | Path to the task directory |
+| `-a` | Agent identifier (e.g., `terminus-2`, `oracle`, `claude-code`) |
+| `-m` | Model identifier passed to the agent (e.g., `anthropic/claude-haiku-4-5`) |
+
+Harbor builds the container, starts the environment, runs the agent, executes the test script, and writes results (including reward, logs, and artifacts) to a `jobs/` directory.
+
+## AI-assisted task creation
+
+If you prefer to build tasks interactively with a coding agent, install the `create-task` skill:
+
+```bash
+npx skills add harbor-framework/harbor --skill create-task
+```
+
+Once installed, your agent can scaffold the full task structure, write the Dockerfile, draft the test script, and help you verify the task end-to-end — all through a guided conversation.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Task Format" href="/tasks/task-format" icon="file-code">
+    Full reference for task.toml fields, reward files, and verifier environments
+  </Card>
+  <Card title="Multi-Step" href="/tasks/multi-step" icon="list-ol">
+    Split a task into sequential steps with per-step instructions and tests
+  </Card>
+  <Card title="Network Policy" href="/tasks/network-policy" icon="network-wired">
+    Control network access for the agent and verifier phases
+  </Card>
+  <Card title="Resources" href="/tasks/resources" icon="microchip">
+    Declare CPU, memory, GPU, and TPU requirements
+  </Card>
+  <Card title="Windows" href="/tasks/windows" icon="windows">
+    Run tasks inside Windows containers
+  </Card>
+  <Card title="Publishing" href="/tasks/publishing" icon="upload">
+    Share tasks via the Harbor registry
+  </Card>
+</CardGroup>

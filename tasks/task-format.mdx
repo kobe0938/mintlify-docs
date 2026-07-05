@@ -1,0 +1,259 @@
+---
+title: "Harbor Task Format: task.toml, Dockerfile, and Tests"
+sidebarTitle: "Task Format"
+description: "Reference for the Harbor task format — task.toml configuration, environment Dockerfile, solution scripts, and test scripts that produce reward files."
+---
+
+Every Harbor task is a directory that follows a predictable layout. Understanding each file's role helps you build tasks that are portable, reproducible, and easy for other developers to read. This page walks through every component in detail.
+
+## Directory structure
+
+```
+my-task/
+├── instruction.md
+├── task.toml
+├── environment/
+│   ├── Dockerfile          # or docker-compose.yaml, or omit when using docker_image
+│   └── ...
+├── solution/
+│   └── solve.sh            # solve.bat for Windows tasks
+└── tests/
+    ├── test.sh             # test.bat for Windows tasks
+    └── ...
+```
+
+---
+
+## task.toml
+
+`task.toml` is the single source of truth for a task's configuration, metadata, timeouts, resource requirements, and network policy. Below is a complete example followed by a field-by-field breakdown.
+
+```toml
+schema_version = "1.3"
+
+[task]
+name = "<org>/<name>"
+description = "A short description of the task"
+authors = [{ name = "Steve Jobs", email = "steve@apple.com" }]
+keywords = ["trivial", "programming"]
+
+[metadata]
+difficulty_explanation = "Trivial task for demonstration"
+category = "programming"
+
+[verifier]
+timeout_sec = 120.0
+env = { API_KEY = "sk-test-123" }
+user = "root"
+
+[agent]
+timeout_sec = 120.0
+user = "agent"
+
+[solution]
+env = { API_KEY = "sk-test-123" }
+
+[environment]
+network_mode = "no-network"
+build_timeout_sec = 600.0
+docker_image = "some-org/some-name:some-tag"
+os = "linux"
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+gpus = 0
+gpu_types = ["H100", "A100"]
+env = { SOME_ENV_VAR = "${SOME_ENV_VAR}" }
+
+[environment.tpu]
+type = "v6e"
+topology = "2x4"
+```
+
+### `schema_version`
+
+The version of the task configuration format. Use `"1.3"` for all new tasks.
+
+### `[task]`
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Package name in `org/name` format (e.g., `"harbor/hello-world"`) |
+| `description` | `string` | Human-readable description of the task |
+| `authors` | `list[Author]` | List of authors, each with `name` and optional `email` |
+| `keywords` | `list[string]` | Keywords for search and categorization |
+
+### `[metadata]`
+
+Arbitrary key-value pairs provided by the task author. Harbor does not interpret these fields — use them for difficulty ratings, categories, benchmark IDs, or anything else that helps consumers of the task.
+
+### `[verifier]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timeout_sec` | `number` | `600.0` | Maximum seconds the test script may run |
+| `env` | `object` | `{}` | Environment variables injected when running the verifier |
+| `user` | `string \| int \| null` | `null` | OS user to run the verifier as (defaults to container default) |
+| `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Optional network override during `verify()` |
+| `environment_mode` | `"shared" \| "separate" \| null` | `null` | Where the verifier runs — see [Verifier environments](#verifier-environments-shared-vs-separate) |
+| `environment` | `EnvironmentConfig \| null` | `null` | Dedicated container for the verifier |
+
+### `[agent]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timeout_sec` | `number \| null` | `null` | Maximum seconds the agent may run (no timeout when omitted) |
+| `user` | `string \| int \| null` | `null` | OS user to run the agent as |
+| `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Optional network override during `agent.run()` |
+
+### `[solution]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `env` | `object` | `{}` | Environment variables injected when running the solution script |
+
+### `[environment]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `build_timeout_sec` | `number` | `600.0` | Timeout for building the Docker image |
+| `docker_image` | `string \| null` | `null` | Pre-built image to use; omit the Dockerfile when set |
+| `os` | `"linux" \| "windows"` | `"linux"` | Target container OS |
+| `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Baseline network policy (defaults to `"public"`) |
+| `cpus` | `integer \| null` | `null` | CPU count requested |
+| `memory_mb` | `integer \| null` | `null` | RAM in megabytes |
+| `storage_mb` | `integer \| null` | `null` | Ephemeral disk in megabytes |
+| `gpus` | `integer \| null` | `null` | GPU count requested |
+| `gpu_types` | `list[string] \| null` | `null` | Acceptable GPU types (e.g., `["H100", "A100"]`) |
+| `env` | `object` | `{}` | Host environment variables resolved at runtime; supports `${VAR}` and `${VAR:-default}` syntax |
+
+---
+
+## Instruction file
+
+The instruction is a plain Markdown file named `instruction.md` at the task root. Write it as you would a prompt: describe what the agent should accomplish, any constraints, and the expected output format. Harbor reads this file and passes its contents to the agent before execution begins.
+
+---
+
+## Environment
+
+The `environment/` directory holds everything needed to build or reference the Docker container the agent works inside. Harbor accepts any of:
+
+- `environment/Dockerfile` — build the image from source.
+- `environment/docker-compose.yaml` — launch a multi-container stack.
+- `[environment].docker_image` in `task.toml` — use a pre-built image and skip the build step entirely.
+
+<Note>
+  Harbor does not require any specific file inside `environment/`. Which file is needed depends on the provider you select when running the task. Most cloud providers support only `Dockerfile`-based environments, not Docker Compose.
+</Note>
+
+### Special paths inside the container
+
+| Path (Linux) | Path (Windows) | Purpose |
+|---|---|---|
+| `/logs/verifier/` | `C:/logs/verifier/` | Reward file and verifier logs written here |
+| `/logs/agent/` | `C:/logs/agent/` | Agents can write their own run logs here |
+| `/solution/` | `C:/solution/` | Oracle agent copies and executes the solution folder here |
+| `/tests/` | `C:/tests/` | Harbor copies the tests folder here at runtime |
+
+Harbor downloads the entire `/logs/` directory to the host after each run, making it available for debugging and analysis.
+
+---
+
+## Solution (optional)
+
+The `solution/` directory provides a reference implementation for the Oracle agent. It must contain:
+
+- `solution/solve.sh` on Linux tasks
+- `solution/solve.bat` on Windows tasks
+
+Harbor selects the correct script based on `[environment].os`. Additional files (helper scripts, fixtures, data files) are allowed alongside the entrypoint script. The Oracle agent copies the entire folder to `/solution/` at runtime and executes the script from the container's working directory.
+
+If you omit the solution directory, the Oracle agent cannot be used to verify that the task is solvable.
+
+---
+
+## Tests
+
+The `tests/` directory contains the verification logic that produces the reward. It must include:
+
+- `tests/test.sh` on Linux tasks
+- `tests/test.bat` on Windows tasks
+
+Harbor copies the entire folder to `/tests/` at runtime and executes the entrypoint script. Use absolute paths inside your test script to avoid working-directory surprises.
+
+### Reward files
+
+Your test script must write a reward file to `/logs/verifier/` before it exits. Harbor reads `reward.json` first and falls back to `reward.txt`.
+
+<Tabs>
+  <Tab title="reward.txt">
+    A plain text file containing a single float or integer. Use `1` for success and `0` for failure:
+
+    ```bash
+    # tests/test.sh
+    #!/bin/bash
+
+    uvx pytest /tests/test.py
+
+    if [ $? -eq 0 ]; then
+      echo 1 > /logs/verifier/reward.txt
+    else
+      echo 0 > /logs/verifier/reward.txt
+    fi
+    ```
+  </Tab>
+  <Tab title="reward.json">
+    A JSON object mapping metric names to float or integer values. Use this when you want to capture multiple dimensions of performance:
+
+    ```bash
+    # tests/test.sh
+    #!/bin/bash
+
+    # ... run tests, capture results ...
+
+    cat > /logs/verifier/reward.json <<EOF
+    {
+      "accuracy": 0.95,
+      "runtime_sec": 1.23,
+      "style": 0.80
+    }
+    EOF
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Verifier environments: shared vs separate
+
+By default, the verifier runs inside the **same container as the agent**. This means it can read any files the agent wrote, see installed packages, and inspect environment variables. For most tasks this is the right choice.
+
+Some tasks need an isolated grading environment — proprietary grading logic the agent must not see, a different OS for grading, or a clean image with verifier-only dependencies. For those, declare a **separate** verifier environment:
+
+```toml
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+docker_image = "my-org/grading-image:latest"
+cpus = 2
+memory_mb = 1024
+```
+
+When `[verifier.environment]` is present, Harbor uses the `tests/` directory as the Docker build context for the verifier image. The image must provide `/tests/test.sh` (or `/tests/test.bat`) at build time — Harbor does not upload tests at runtime for separate environments.
+
+### Resolution table
+
+| `environment_mode` | `[verifier.environment]` | Result |
+|---|---|---|
+| omitted | omitted | `"shared"` |
+| omitted | present | `"separate"` |
+| `"shared"` | omitted | `"shared"` |
+| `"shared"` | present | **validation error** |
+| `"separate"` | omitted | `"separate"` (fresh copy of `[environment]`) |
+| `"separate"` | present | `"separate"` (uses the verifier-specific environment) |
+
+<Info>
+  When the verifier runs in a separate environment, Harbor transfers `/logs/artifacts/` and any paths listed in the task-level `artifacts` field into the verifier container at their original absolute paths.
+</Info>

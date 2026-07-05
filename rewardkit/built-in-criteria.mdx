@@ -1,0 +1,167 @@
+---
+title: "Reward Kit Built-In Criteria Reference"
+sidebarTitle: "Built-In Criteria"
+description: "Reward Kit provides 20+ built-in criteria for grading files, commands, JSON, CSV, HTTP endpoints, images, and agent trajectories. No custom code required."
+---
+
+Reward Kit ships with built-in criteria that cover the most common rubric patterns seen across popular benchmarks. Call any of them from a Python file in your `tests/` directory — no imports beyond `rewardkit` are required.
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.file_exists("output.txt")
+rk.command_succeeds("python main.py", weight=2.0)
+```
+
+<Note>
+  All built-in criteria accept two optional parameters in addition to the ones listed below:
+  - `weight` (default `1.0`) — importance multiplier used when averaging scores across criteria in a directory
+  - `isolated` (default `False`) — when `True`, mounts the workspace read-only via overlayfs so the criterion cannot affect subsequent ones
+</Note>
+
+## File Criteria
+
+File criteria check the existence, content, and similarity of files in the agent workspace.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `file_exists` | `path` | File exists in workspace |
+| `file_not_exists` | `path` | File does not exist |
+| `file_contains` | `path, text` | File contains a substring |
+| `file_contains_regex` | `path, pattern` | File content matches a regex pattern |
+| `file_matches` | `path, expected` | File content equals expected text (whitespace-stripped) |
+| `files_equal` | `path1, path2` | Two files have identical content |
+| `diff_ratio` | `path, expected` | Similarity ratio between file content and expected text (returns `0.0`–`1.0`) |
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.file_exists("output.txt")
+rk.file_not_exists("error.log")
+rk.file_contains("output.txt", "SUCCESS")
+rk.file_contains_regex("report.md", r"## Summary")
+rk.file_matches("result.txt", "42\n")
+rk.files_equal("output.csv", "expected.csv")
+rk.diff_ratio("essay.txt", "reference.txt", weight=2.0)
+```
+
+## Command Criteria
+
+Command criteria run shell commands in the workspace and evaluate their exit code or output.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `command_succeeds` | `cmd, cwd?, timeout?` | Command exits with code 0 |
+| `command_output_contains` | `cmd, text, cwd?, timeout?` | Command stdout contains text |
+| `command_output_matches` | `cmd, expected, cwd?, timeout?` | Command stdout equals expected (whitespace-stripped) |
+| `command_output_matches_regex` | `cmd, pattern, cwd?, timeout?` | Command stdout matches a regex |
+
+<Note>
+  The default timeout is 30 seconds. The `cwd` parameter is relative to the workspace root.
+</Note>
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.command_succeeds("python main.py")
+rk.command_succeeds("pytest tests/", timeout=60)
+rk.command_output_contains("python main.py", "Hello, world")
+rk.command_output_matches("python -c \"print(2+2)\"", "4")
+rk.command_output_matches_regex("python main.py", r"Total: \d+")
+```
+
+## Data Format Criteria
+
+Data format criteria inspect structured files — JSON, CSV, Excel spreadsheets, and SQLite databases.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `json_key_equals` | `path, key, expected` | Top-level JSON key equals a value |
+| `json_path_equals` | `path, json_path, expected` | Dot-separated path into JSON equals a value |
+| `csv_cell_equals` | `path, row, col, expected` | CSV cell at row/col equals a value |
+| `xlsx_cell_equals` | `path, cell, expected, sheet?` | Excel cell equals a value |
+| `sqlite_query_equals` | `db_path, query, expected` | SQL query result equals a value |
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.json_key_equals("config.json", "status", "ok")
+rk.json_path_equals("result.json", "summary.total", 42)
+rk.csv_cell_equals("report.csv", 1, "revenue", "1000")
+rk.xlsx_cell_equals("data.xlsx", "B2", "Alice")
+rk.sqlite_query_equals("db.sqlite", "SELECT COUNT(*) FROM users", 10)
+```
+
+<Info>
+  `xlsx_cell_equals` requires the `documents` extra: `uv add harbor-rewardkit[documents]`
+</Info>
+
+<Info>
+  For `csv_cell_equals`, row numbering depends on the column type. When `col` is an **integer**, a raw CSV reader is used and row `0` is the header row. When `col` is a **string** (column name), row `0` is the first data row after the header.
+</Info>
+
+## HTTP Criteria
+
+HTTP criteria send requests to a running service and check the response.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `http_status_equals` | `url, status?, timeout?` | HTTP response has the expected status code (default 200) |
+| `http_response_contains` | `url, text, timeout?` | HTTP response body contains text |
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.http_status_equals("http://localhost:8080/health")
+rk.http_status_equals("http://localhost:8080/missing", status=404)
+rk.http_response_contains("http://localhost:8080/api/data", "\"status\": \"ok\"")
+```
+
+## Image Criteria
+
+Image criteria compare or inspect image files. They require the `image` extra.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `image_similarity` | `path1, path2` | Pixel-level similarity ratio (returns `0.0`–`1.0`) |
+| `image_size_equals` | `path, width, height` | Image has the expected dimensions |
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.image_similarity("output.png", "reference.png", weight=2.0)
+rk.image_size_equals("thumbnail.jpg", 128, 128)
+```
+
+<Info>
+  Image criteria require the `image` extra: `uv add harbor-rewardkit[image]`
+</Info>
+
+## Trajectory Criteria
+
+Trajectory criteria inspect the agent's [ATIF](https://github.com/harbor-framework/harbor) trajectory file (default path: `/logs/trajectory.json`). Use these to verify that the agent used specific tools, avoided others, or completed the task within a turn budget.
+
+| Criterion | Parameters | Description |
+|---|---|---|
+| `trajectory_tool_used` | `tool_name, min_count?, path?` | Agent used a specific tool at least `min_count` times (default 1) |
+| `trajectory_tool_not_used` | `NN tool_name, path?` | Agent did not use a specific tool |
+| `trajectory_turn_count` | `max_turns, path?` | Penalizes exceeding a turn budget — returns `1.0` at `max_turns`, linearly decays to `0.0` at double |
+
+```python title="tests/check.py"
+import rewardkit as rk
+
+rk.trajectory_tool_used("bash")
+rk.trajectory_tool_used("read_file", min_count=3)
+rk.trajectory_tool_not_used("web_search")
+rk.trajectory_turn_count(max_turns=20, weight=0.5)
+```
+
+## Optional Extras
+
+Some criteria require optional extras to be installed. The table below summarizes which extras enable which criteria:
+
+| Extra | Criteria enabled | Install command |
+|---|---|---|
+| `documents` | `xlsx_cell_equals` | `uv add harbor-rewardkit[documents]` |
+| `image` | `image_similarity`, `image_size_equals` | `uv add harbor-rewardkit[image]` |
+| `all` | All of the above | `uv add harbor-rewardkit[all]` |

@@ -1,0 +1,151 @@
+---
+title: "Reinforcement Learning on Harbor Containerized Tasks"
+sidebarTitle: "RL Training"
+description: "Use Harbor to generate RL rollouts from containerized agent tasks. Implement an RL framework rollout interface using JobConfig, TrialConfig, and TaskConfig."
+---
+
+Harbor provides a straightforward interface for training on containerized agentic environments. Performing RL on Harbor tasks involves generating rollouts and recording tokens and rewards, which typically means implementing your RL framework's rollout interface.
+
+## What Harbor RL support provides
+
+Harbor lets you run large batches of agentic rollouts inside isolated containers and collect the token sequences and rewards your training loop needs. You configure runs using standard Harbor classes, then iterate over trial results to extract rewards and token data.
+
+<CardGroup cols={3}>
+  <Card title="TrialConfig" icon="gear">
+    Configure individual trial settings such as agent, model, and environment parameters.
+  </Card>
+  <Card title="JobConfig" icon="briefcase">
+    Define the full job: dataset, orchestration concurrency, and environment type.
+  </Card>
+  <Card title="TaskConfig" icon="list-check">
+    Point the rollout interface at either a remote registry task or a local task directory.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Use [cloud sandboxes](/run-jobs/cloud-sandboxes) for scaling rollouts. They reduce per-trial startup and teardown overhead significantly compared to local Docker environments.
+</Tip>
+
+## Configuring tasks as batch objects
+
+Rollout interfaces typically receive a batch of tasks to generate rollouts against. Use `TaskConfig` as the batch object — it can reference tasks from a remote version-control repository or from a local directory.
+
+```python
+task_configs = [
+    TaskConfig(
+        path="cancel-async-tasks",
+        git_url="https://<version-control-url>/<org>/<repo>.git",
+        git_commit_id="<hash>"
+    ),  # Remote task
+    TaskConfig(
+        path="tasks/fix-dockerfile-syntax",
+    ),  # Local task
+]
+```
+
+## Rollout interface example
+
+The example below shows how to implement a rollout interface for a hypothetical RL framework. The `HarborRolloutInterface` class creates a `Job`, runs it, and maps each `TrialResult` to a `Rollout` containing the reward and token data.
+
+```python title="rollout_interface.py"
+from pathlib import Path
+
+from pydantic import BaseModel
+
+from harbor.job import Job
+from harbor.models.environment_type import EnvironmentType
+from harbor.models.job.config import JobConfig, OrchestratorConfig
+from harbor.models.trial.config import EnvironmentConfig, TaskConfig
+
+from your_rl_framework import SomeRLFrameworkRolloutInterface, Rollout
+
+
+class HarborRolloutInterface(SomeRLFrameworkRolloutInterface):
+    async def run(self, task_ids: list[TaskId]) -> list[Rollout]:
+        job = Job(
+            config=JobConfig(
+                jobs_dir=Path("jobs"),
+                environment=EnvironmentConfig(
+                    type=EnvironmentType.DAYTONA,
+                ),
+                agents=[
+                    AgentConfig(
+                        name=AgentName.TERMINUS_2,
+                        model_name="hosted_vllm/<model-name>",
+                        kwargs={
+                            "base_url": "https://<vllm-server-url>",
+                        }
+                    )
+                ],
+                orchestrator=OrchestratorConfig(
+                    n_concurrent_trials=32,
+                ),
+                tasks=task_configs,
+            ),
+        )
+
+        result = await job.run()
+
+        rollouts = []
+        for trial_result in result.trial_results:
+            reward = (
+                trial_result.verifier_result.rewards.get("reward", 0)
+                if trial_result.verifier_result and trial_result.verifier_result.rewards
+                else 0
+            )
+
+            if (
+                trial_result.agent_result
+                and trial_result.agent_result.metadata
+                and "token_ids" in trial_result.agent_result.metadata
+                and "mask_ids" in trial_result.agent_result.metadata
+            ):
+                token_ids = trial_result.agent_result.metadata["token_ids"]
+                mask_ids = trial_result.agent_result.metadata["mask_ids"]
+            else:
+                raise ValueError(
+                    f"Missing token_ids or mask_ids for trial {trial_result.trial_name}"
+                )
+
+            rollout = Rollout(
+                reward=reward,
+                token_ids=token_ids,
+                mask_ids=mask_ids,
+            )
+
+            rollouts.append(rollout)
+
+        return rollouts
+```
+
+## Collecting tokens from agents
+
+You have two strategies for making token sequences available to your training loop:
+
+<AccordionGroup>
+  <Accordion title="1. Intercepting tokens from a vLLM server" icon="server">
+    This approach assumes you are running a vLLM server to generate tokens and that your RL framework includes built-in interception support. The framework intercepts completions before they reach the agent, so no agent-side changes are needed.
+  </Accordion>
+  <Accordion title="2. Returning tokens as agent result metadata" icon="code">
+    This approach requires your agent to include `token_ids` and `mask_ids` in `agent_result.metadata`. Harbor is actively adding flags to Terminus 2 to return this information automatically. If you use a custom agent harness, make sure to populate these fields in your `AgentResult` metadata.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  The rollout interface example above uses strategy (2) — it reads `token_ids` and `mask_ids` directly from `trial_result.agent_result.metadata` and raises an error when either field is missing.
+</Note>
+
+## Scaling with cloud sandboxes
+
+For production RL training, run your rollouts on cloud sandboxes rather than local Docker. Set `EnvironmentType.DAYTONA` (or another cloud provider) in your `EnvironmentConfig` and increase `n_concurrent_trials` to match your desired throughput.
+
+```python
+environment=EnvironmentConfig(
+    type=EnvironmentType.DAYTONA,
+),
+orchestrator=OrchestratorConfig(
+    n_concurrent_trials=32,
+),
+```
+
+Cloud sandboxes start faster and scale horizontally, making them the recommended choice for generating the large rollout batches that RL training requires.

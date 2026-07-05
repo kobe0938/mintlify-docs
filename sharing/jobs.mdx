@@ -1,0 +1,88 @@
+---
+title: "Sharing Harbor Job Results with Your Team"
+sidebarTitle: "Sharing"
+description: "Share Harbor evaluation job results with teammates or publicly via Harbor Hub. Control visibility with organization and user-level access settings."
+---
+
+When you finish an evaluation run, you can upload the job to [Harbor Hub](https://hub.harborframework.com/jobs) to get a shareable link. From there you control who can see the results — scope access to specific users and organizations, or make the job public. Run `harbor auth login` before uploading.
+
+## Uploading a job to Hub
+
+Upload an existing local job directory with `harbor upload`:
+
+```bash
+harbor upload jobs/my-job
+harbor upload jobs/my-job --public
+harbor upload jobs/my-job --private
+harbor upload jobs/my-job --share-org my-org --share-user alice
+```
+
+New uploads are **private** by default unless you pass `--public`. Re-uploading is idempotent: without a visibility flag, Harbor preserves the server-side visibility; with `--public` or `--private`, it updates it.
+
+### Upload flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `-c, --concurrency <n>` | | Maximum concurrent trial uploads. |
+| `--share-org <org>` | | Share with an organization. Repeatable. |
+| `--share-user <username>` | | Share with a GitHub user. Repeatable. |
+| `-y, --yes` | | Confirm shares with organizations you are not a member of. |
+
+## Uploading while running
+
+Stream trials to Hub as they finish by adding `--upload` to `harbor run`:
+
+```bash
+harbor run -d "my-org/my-dataset@latest" -a "<agent>" -m "<model>" --upload
+harbor run -d "my-org/my-dataset@latest" -a "<agent>" -m "<model>" --upload --public
+harbor run -d "my-org/my-dataset@latest" -a "<agent>" -m "<model>" --upload --share-org my-org
+```
+
+`--upload` streams trial results as they complete and finalizes the job archive at the end. The `--public`, `--private`, `--share-org`, and `--share-user` flags require `--upload`. If a run finishes but the upload does not complete, rerun `harbor upload <job-dir>` to finish it.
+
+## Resuming with upload
+
+Fill in missing trials and finalize a partially uploaded job by adding `--upload` to `harbor job resume`:
+
+```bash
+harbor job resume -p jobs/my-job --upload
+harbor job resume -p jobs/my-job --upload --private --share-user alice
+```
+
+## Sharing an already-uploaded job
+
+Find a job's ID from its page on Harbor Hub, then add org or user shares:
+
+```bash
+harbor job share <job-id> --org my-org
+harbor job share <job-id> --user alice --user bob
+```
+
+Private jobs are visible only to you and explicit shares. Public jobs are visible to everyone. Adding a share does not change the public/private visibility — it only grants additional access on top of the existing setting.
+
+## Checking who a job is shared with
+
+Use `harbor hub job shares JOB_ID` to list the organizations and users who have access:
+
+```bash
+harbor hub job shares JOB_ID
+```
+
+## Downloading results
+
+Download an uploaded job or a specific trial by ID:
+
+```bash
+harbor job download <job-id>
+harbor trial download <trial-id>
+```
+
+Jobs download to `./jobs/<job-name>` and trials to `./trials/<trial-name>` by default. Use `-o, --output-dir <dir>` to choose a different parent directory, or `--overwrite` to replace an existing local directory.
+
+<Note>
+  Use `harbor download` (the top-level command) for tasks and datasets from the registry. `harbor job download` and `harbor trial download` are specifically for uploaded run results.
+</Note>
+
+## See also
+
+- [Hub Overview](/hub/overview) — browse and compare jobs from the CLI

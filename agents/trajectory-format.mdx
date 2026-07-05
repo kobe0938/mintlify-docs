@@ -1,0 +1,322 @@
+---
+title: "ATIF: Harbor Agent Trajectory Interchange Format"
+sidebarTitle: "Trajectory Format"
+description: "ATIF is Harbor's standard trajectory format for recording agent execution steps. Required for SFT export, trajectory viewing, and LLM-as-judge evaluation."
+---
+
+The **Agent Trajectory Interchange Format (ATIF)** is Harbor's standardized, JSON-based specification for logging the complete interaction history of an autonomous LLM agent. Before ATIF, each agent produced its own idiosyncratic output files, making it difficult to build shared tooling for visualization, fine-tuning, and evaluation. ATIF solves that by giving every agent a single, consistent schema — one that works across debugging, SFT pipelines, RL training, and LLM-as-judge evaluation without any per-agent conversion code on your end.
+
+For the full technical specification, see the [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
+
+## Supported Agents
+
+The following agents in Harbor automatically produce ATIF-compliant `trajectory.json` files:
+
+<CardGroup cols={3}>
+  <Card title="Terminus-2" icon="terminal" href="/agents/terminus-2">
+    Harbor's native reference agent
+  </Card>
+  <Card title="OpenHands" icon="hand" >
+    Converts OpenHands event logs to ATIF
+  </Card>
+  <Card title="Mini-SWE-Agent" icon="code">
+    Software engineering agent
+  </Card>
+  <Card title="Gemini CLI" icon="sparkles">
+    Google's Gemini agent interface
+  </Card>
+  <Card title="Claude Code" icon="robot">
+    Anthropic's code agent
+  </Card>
+  <Card title="Codex" icon="wand-magic-sparkles">
+    OpenAI's Codex agent
+  </Card>
+</CardGroup>
+
+## What ATIF Captures
+
+An ATIF trajectory is a root `Trajectory` object containing a list of `Step` records. Each step can represent a user message, an agent response, or a system event. Together they reconstruct the exact sequence of messages that was exchanged, including:
+
+- **Complete interaction history** — user messages, agent responses, tool executions, and environment feedback
+- **Multi-turn conversations** — both single-turn tasks and extended conversational interactions
+- **LLM metrics** — token counts, cost, logprobs, and other operational data
+- **Tool calls and observations** — structured records of every action the agent took and what it observed in return
+- **Multi-agent systems** — subagent delegation and hierarchical execution via `subagent_trajectories`
+- **Custom metadata** — optional `extra` fields at every level for agent-specific annotations
+
+## Trajectory Structure
+
+### Core Data Classes
+
+Harbor provides Pydantic models for every ATIF component in `harbor.models.trajectories`. Use them to build, validate, and export trajectories type-safely.
+
+<Tabs>
+  <Tab title="Trajectory">
+    The root object. Every trajectory file is a serialised `Trajectory`.
+
+    ```python
+    from harbor.models.trajectories import Trajectory, Agent, Step
+
+    trajectory = Trajectory(
+        schema_version="ATIF-v1.7",
+        session_id="session-123",
+        agent=Agent(
+            name="my-agent",
+            version="1.0.0",
+            model_name="claude-3-5-sonnet-20241022"
+        ),
+        steps=[
+            # ... Step objects
+        ]
+    )
+    ```
+  </Tab>
+  <Tab title="Step">
+    A single interaction unit. Set `source` to `"user"`, `"agent"`, or `"system"`.
+
+    ```python
+    from harbor.models.trajectories import Step, ToolCall, Observation, ObservationResult, Metrics
+
+    # User turn
+    user_step = Step(
+        step_id=1,
+        timestamp="2025-01-15T10:30:00Z",
+        source="user",
+        message="Create a file called hello.txt with 'Hello, world!' as the content."
+    )
+
+    # Agent turn with a tool call
+    agent_step = Step(
+        step_id=2,
+        timestamp="2025-01-15T10:30:02Z",
+        source="agent",
+        model_name="claude-3-5-sonnet-20241022",
+        message="I'll create the file for you.",
+        reasoning_content="The user wants a simple text file. I'll use the file_write tool.",
+        tool_calls=[
+            ToolCall(
+                tool_call_id="call_1",
+                function_name="file_write",
+                arguments={"path": "hello.txt", "content": "Hello, world!"}
+            )
+        ],
+        observation=Observation(
+            results=[
+                ObservationResult(
+                    source_call_id="call_1",
+                    content="File created successfully"
+                )
+            ]
+        ),
+        metrics=Metrics(
+            prompt_tokens=520,
+            completion_tokens=80,
+            cached_tokens=200,
+            cost_usd=0.00045
+        )
+    )
+    ```
+  </Tab>
+  <Tab title="Metrics & FinalMetrics">
+    Per-step and trajectory-level aggregate token and cost data.
+
+    ```python
+    from harbor.models.trajectories import Metrics, FinalMetrics
+
+    # Per-step metrics
+    metrics = Metrics(
+        prompt_tokens=520,
+        completion_tokens=80,
+        cached_tokens=200,
+        cost_usd=0.00045,
+        logprobs=[-0.1, -0.05, -0.02],          # Optional
+        completion_token_ids=[1722, 310, 5533]   # Optional, for RL
+    )
+
+    # Trajectory-level aggregates
+    final_metrics = FinalMetrics(
+        total_prompt_tokens=1120,
+        total_completion_tokens=124,
+        total_cached_tokens=200,
+        total_cost_usd=0.00078,
+        total_steps=3
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Building a Complete Trajectory
+
+Here is a full end-to-end example — building a trajectory, exporting it to JSON, and validating it:
+
+```python
+from harbor.models.trajectories import (
+    Trajectory, Agent, Step,
+    ToolCall, Observation, ObservationResult,
+    Metrics, FinalMetrics,
+)
+from harbor.utils.trajectory_validator import validate_trajectory
+import json
+
+trajectory = Trajectory(
+    schema_version="ATIF-v1.7",
+    session_id="025B810F-B3A2-4C67-93C0-FE7A142A947A",
+    agent=Agent(
+        name="my-agent",
+        version="1.0.0",
+        model_name="claude-3-5-sonnet-20241022",
+    ),
+    steps=[
+        Step(
+            step_id=1,
+            timestamp="2025-01-15T10:30:00Z",
+            source="user",
+            message="What is the current trading price of Alphabet (GOOGL)?",
+        ),
+        Step(
+            step_id=2,
+            timestamp="2025-01-15T10:30:02Z",
+            source="agent",
+            message="I will search for the current trading price for GOOGL.",
+            reasoning_content="The request requires the current stock price. I will execute a tool call.",
+            tool_calls=[
+                ToolCall(
+                    tool_call_id="call_price_1",
+                    function_name="financial_search",
+                    arguments={"ticker": "GOOGL", "metric": "price"},
+                )
+            ],
+            observation=Observation(
+                results=[
+                    ObservationResult(
+                        source_call_id="call_price_1",
+                        content="GOOGL is currently trading at $185.35",
+                    )
+                ]
+            ),
+            metrics=Metrics(
+                prompt_tokens=520,
+                completion_tokens=80,
+                cached_tokens=200,
+                cost_usd=0.00045,
+            ),
+        ),
+        Step(
+            step_id=3,
+            timestamp="2025-01-15T10:30:05Z",
+            source="agent",
+            message="Alphabet (GOOGL) is trading at $185.35.",
+            metrics=Metrics(
+                prompt_tokens=600,
+                completion_tokens=44,
+                cost_usd=0.00033,
+            ),
+        ),
+    ],
+    final_metrics=FinalMetrics(
+        total_prompt_tokens=1120,
+        total_completion_tokens=124,
+        total_cached_tokens=200,
+        total_cost_usd=0.00078,
+        total_steps=3,
+    ),
+)
+
+# Export to JSON — excludes None values by default
+with open("trajectory.json", "w") as f:
+    json.dump(trajectory.to_json_dict(), f, indent=2)
+
+# Validate
+is_valid = validate_trajectory(trajectory.to_json_dict())
+print(f"Trajectory is valid: {is_valid}")
+```
+
+## Validating Trajectory Files
+
+Harbor ships a trajectory validator that checks files against the full ATIF schema.
+
+### From the Command Line
+
+```bash
+python -m harbor.utils.trajectory_validator trajectory.json
+```
+
+A valid file prints:
+
+```
+✓ Trajectory is valid: trajectory.json
+```
+
+An invalid file prints all errors at once:
+
+```
+✗ Trajectory validation failed: trajectory.json
+
+Found 2 error(s):
+  - trajectory.steps.0.step_id: expected 1 (sequential from 1), got 0
+  - trajectory.agent.name: required field is missing
+```
+
+### Programmatically
+
+```python
+from harbor.utils.trajectory_validator import TrajectoryValidator
+
+validator = TrajectoryValidator()
+
+# Validate from a file path, a dict, or a raw JSON string
+is_valid = validator.validate("trajectory.json")
+
+if not is_valid:
+    for error in validator.get_errors():
+        print(f"Error: {error}")
+```
+
+The validator enforces:
+- Required fields and correct types
+- Sequential `step_id` values starting from 1
+- Tool call references in observations that match declared `tool_call_id` values
+- ISO 8601 timestamps
+- Agent-only fields (e.g. `tool_calls`, `metrics`) present only on agent steps
+
+## Using Trajectory Files
+
+Once an agent produces a `trajectory.json`, you can use it with any Harbor tooling that understands ATIF:
+
+```bash
+# View a trajectory in the Harbor trace viewer
+harbor traces export -p jobs/<job-name> --recursive
+
+# Validate a file directly
+python -m harbor.utils.trajectory_validator path/to/trajectory.json
+```
+
+<Info>
+  SFT export and LLM-as-judge evaluation both require valid ATIF trajectories. If you are integrating a custom agent, implementing `populate_context_post_run` to write a `trajectory.json` in ATIF format is the recommended path to unlock those features.
+</Info>
+
+## Schema Versions
+
+ATIF follows semantic versioning. The current version is **ATIF-v1.7**.
+
+| Version | Changes |
+|---|---|
+| **v1.7** (current) | Added `subagent_trajectories` and `trajectory_id` for single-file subagent embedding; added `extra` on `ToolCall` and `ObservationResult`; added `llm_call_count` on `Step`; relaxed `session_id` to optional |
+| **v1.6** | Added multimodal content support via `ContentPart` and `ImageSource`; extended `message` and observation `content` to accept content-part arrays |
+| **v1.5** | Added optional `tool_definitions` on `Agent` for storing tool/function definitions used in SFT pipelines |
+| **v1.4** | Added optional `prompt_token_ids` on `Metrics` |
+| **v1.3** | Added optional `completion_token_ids` on `Metrics` for RL training |
+| **v1.2** | Extended `observation` to support system steps |
+| **v1.1** | Added optional `extra` field at the root level |
+| **v1.0** | Initial specification |
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Terminus-2" icon="terminal" href="/agents/terminus-2">
+    Configure trajectory recording with `raw_content` and `linear_history` options.
+  </Card>
+  <Card title="Agents Overview" icon="list" href="/agents/overview">
+    Learn how to integrate your own agent and produce ATIF trajectories.
+  </Card>
+</CardGroup>

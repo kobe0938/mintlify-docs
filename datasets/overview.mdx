@@ -1,0 +1,84 @@
+---
+title: "Harbor Datasets: Collections of Eval Tasks"
+sidebarTitle: "Overview"
+description: "A Harbor dataset is a collection of tasks for evaluation and training. Run local datasets, published registry datasets, or datasets from Git repositories."
+---
+
+A Harbor dataset is a collection of [tasks](/tasks/overview) grouped together for evaluation or training purposes. Each task packages an instruction, a sandbox environment, and a test script. Datasets sometimes define custom metrics that aggregate rewards across those tasks into a single summary score.
+
+Tasks have a many-to-many relationship with datasets — the same task can belong to multiple datasets, and a single dataset can pull tasks from many different sources. This lets you compose targeted evaluation groups, such as a composite benchmark that draws ten tasks each from several upstream benchmarks.
+
+## Three ways to use datasets
+
+<CardGroup cols={3}>
+  <Card title="Local datasets" icon="folder-open">
+    Run a directory of tasks from your local filesystem using the `--path` flag.
+  </Card>
+  <Card title="Published datasets" icon="cloud">
+    Run a dataset published to the [Harbor registry](https://hub.harborframework.com/) using the `--dataset` flag.
+  </Card>
+  <Card title="Git repo datasets" icon="code-branch">
+    Run a dataset directly from any GitHub, GitLab, or Hugging Face repository using the `--repo` flag.
+  </Card>
+</CardGroup>
+
+## Local datasets
+
+Run a local directory of tasks with the `--path` or `-p` flag:
+
+```bash
+harbor run -p "<path/to/dataset>" -a "<agent>" -m "<model>"
+```
+
+Harbor scans the directory for tasks, resolves any `metric.py` file alongside them, and runs the full set.
+
+## Published datasets
+
+Datasets can be published and shared with members of your organization or publicly on the [Harbor registry](https://hub.harborframework.com/). Private datasets are accessible only to members of the publishing organization. Public datasets are available to anyone.
+
+Run a published dataset with the `--dataset` or `-d` flag:
+
+```bash
+harbor run -d "my-org/my-dataset@1.0" -a "<agent>" -m "<model>"
+```
+
+The `@1.0` suffix pins the run to a specific version tag. Omitting it resolves to `@latest` automatically.
+
+<Tip>
+  To see all datasets registered with your current credentials, run `harbor dataset list`.
+</Tip>
+
+## Git repository datasets
+
+Run a dataset directly from any Git repository without publishing it to the registry first:
+
+```bash
+harbor run --repo org/repo-name -d "my-dataset" -a "<agent>" -m "<model>"
+```
+
+Harbor clones the repository, reads its `registry.json` manifest, and resolves the named dataset. This works with GitHub, GitLab, and Hugging Face repositories. You can pin to a specific branch, tag, or commit using `@ref` syntax (for example, `org/repo-name@v1.0`).
+
+## List available datasets
+
+To list all datasets available in the Harbor registry under your current credentials, run:
+
+```bash
+harbor dataset list
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Publishing" icon="upload" href="/datasets/publishing">
+    Publish your own dataset to the Harbor registry to share it with your organization or the public.
+  </Card>
+  <Card title="Git Repos" icon="code-branch" href="/datasets/git-repos">
+    Run datasets directly from GitHub, GitLab, or Hugging Face repositories.
+  </Card>
+  <Card title="Adapters" icon="plug" href="/datasets/adapters">
+    Convert existing benchmark formats into Harbor tasks using dataset adapters.
+  </Card>
+  <Card title="Metrics" icon="chart-bar" href="/datasets/metrics">
+    Define custom aggregate metrics for your datasets.
+  </Card>
+</CardGroup>

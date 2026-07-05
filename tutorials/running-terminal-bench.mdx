@@ -1,0 +1,77 @@
+---
+title: "Running Terminal-Bench with Harbor"
+sidebarTitle: "Terminal-Bench"
+description: "Tutorial: run the Terminal-Bench evaluation suite with Harbor. Install Harbor, choose an agent and model, run the benchmark, and analyze your results."
+---
+
+[Terminal-Bench](https://tbench.ai) is a benchmark for evaluating agent performance on terminal-based tasks. Harbor is the official harness for running Terminal-Bench 2.0, providing a consistent environment, parallel execution, and direct leaderboard submission support.
+
+## Prerequisites
+
+Before you run Terminal-Bench, install Harbor and make sure Docker is installed and running on your machine. See the [Getting Started guide](/quickstart) for full installation instructions.
+
+## Running Terminal-Bench
+
+<Steps>
+  <Step title="Verify your Harbor installation">
+    Confirm that Harbor is set up correctly by running the oracle solutions for Terminal-Bench 2.0. The oracle agent executes the reference solutions, so it should pass all tasks if your environment is configured properly.
+
+    ```bash
+    harbor run -d terminal-bench/terminal-bench-2 -a oracle
+    ```
+
+    If the oracle run completes without errors, your installation is ready.
+  </Step>
+  <Step title="Run with your chosen agent and model">
+    Replace the placeholders with the agent and model you want to evaluate. The example below runs Claude Code on the full Terminal-Bench 2.0 dataset:
+
+    ```bash
+    harbor run \
+      -d terminal-bench/terminal-bench-2 \
+      -m "anthropic/claude-haiku-4-5" \
+      -a "claude-code"
+    ```
+
+    Harbor creates a job directory under `jobs/` and streams trial results as they complete.
+  </Step>
+  <Step title="Scale with cloud sandboxes">
+    For faster parallel execution, run on a cloud sandbox provider instead of local Docker. The example below uses Daytona with 32 concurrent trials:
+
+    ```bash
+    export DAYTONA_API_KEY="<your-daytona-api-key>"
+    export ANTHROPIC_API_KEY="<your-anthropic-api-key>"
+
+    harbor run \
+      -d terminal-bench/terminal-bench-2 \
+      -m anthropic/claude-haiku-4-5 \
+      -a claude-code \
+      --env daytona \
+      -n 32
+    ```
+
+    Cloud sandboxes start containers faster and scale horizontally, making them the recommended environment for full benchmark runs. See [Cloud Sandboxes](/run-jobs/cloud-sandboxes) for a full list of supported providers.
+  </Step>
+  <Step title="View your results">
+    Once the run finishes, inspect your results in the local viewer:
+
+    ```bash
+    harbor view jobs/<job-name>
+    ```
+
+    You can also upload the job to [Harbor Hub](https://hub.harborframework.com) to share results or compare against other runs:
+
+    ```bash
+    harbor upload jobs/<job-name>
+    ```
+  </Step>
+</Steps>
+
+## Testing your own agent
+
+See the [Agents documentation](/agents) to learn how to configure a custom agent and run it against Terminal-Bench.
+
+## Submitting to the Terminal-Bench leaderboard
+
+To submit your results to the official Terminal-Bench leaderboard, upload your job to Harbor Hub and use `harbor leaderboard submit`. See the [Submit to Leaderboard](/leaderboard/submit) guide for the full workflow.
+
+You can view the current leaderboard at [tbench.ai/leaderboard](https://tbench.ai/leaderboard).

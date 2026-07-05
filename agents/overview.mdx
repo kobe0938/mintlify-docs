@@ -1,0 +1,146 @@
+---
+title: "Using and Integrating Agents in Harbor"
+sidebarTitle: "Overview"
+description: "Harbor ships with pre-integrated agents like Terminus-2, Claude Code, and Gemini CLI. Learn how to use built-in agents and integrate your own custom agent."
+---
+
+Agents are the programs Harbor places inside a sandboxed container environment to complete tasks. Harbor comes with a set of popular agents pre-integrated so you can start running evaluations immediately, and it also gives you two clean extension points for bringing your own agent — without touching Harbor's source code.
+
+## Pre-Integrated Agents
+
+Harbor ships with Terminus-2, Claude Code, Copilot CLI, Codex CLI, Gemini CLI, OpenHands, Mini-SWE-Agent, and more. To see the full list of available agents at any time, run:
+
+```bash
+harbor run --help
+```
+
+Look for the `--agent` flag in the output — it lists every agent identifier Harbor recognises.
+
+<CardGroup cols={2}>
+  <Card title="Terminus-2" icon="terminal" href="/agents/terminus-2">
+    Harbor's native coding agent. Optimized for agentic evals and RL training with a mono-tool tmux design.
+  </Card>
+  <Card title="ACP Registry Agents" icon="globe" href="/agents/acp">
+    Run any agent published in the Agent Client Protocol registry using the built-in `acp` runner.
+  </Card>
+</CardGroup>
+
+## Integrating Your Own Agent
+
+Harbor supports two integration patterns. Choose based on where your agent's logic lives relative to the container.
+
+<CardGroup cols={2}>
+  <Card title="External Agent" icon="arrow-right-from-bracket">
+    Logic runs **outside** the container. Communicates with the environment through `exec` commands via the `BaseEnvironment` interface.
+  </Card>
+  <Card title="Installed Agent" icon="box">
+    Logic runs **inside** the container. Installed directly into the container image in headless mode. Most built-in agents use this pattern.
+  </Card>
+</CardGroup>
+
+### External Agents
+
+An external agent implements the `BaseAgent` interface. You define four methods: a static `name`, a `version`, a `setup` hook that runs before the task starts, and a `run` method that drives the agent through the environment.
+
+```python title="my_external_agent.py"
+from harbor.agents.base import BaseAgent
+
+class MyExternalAgent(BaseAgent):
+    @staticmethod
+    def name() -> str:
+        """The name of the agent."""
+        pass
+
+    def version(self) -> str | None:
+        """The version of the agent."""
+        pass
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        """
+        Run commands to setup the agent & its tools.
+        """
+        pass
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        """
+        Runs the agent in the environment. Be sure to populate the context with the
+        results of the agent execution. Ideally, populate the context as the agent
+        executes in case of a timeout or other error.
+
+        Args:
+            instruction: The task instruction.
+            environment: The environment in which to complete the task.
+            context: The context to populate with the results of the agent execution.
+        """
+        pass
+```
+
+<Tip>
+  Populate `context` incrementally as the agent runs — not only at the end. That way, Harbor captures partial results even if the task times out or errors before completion.
+</Tip>
+
+### Installed Agents
+
+An installed agent implements `BaseInstalledAgent`. You define an `install` method that sets up the agent inside the container, a `run` method that executes the task, and a `populate_context_post_run` method that extracts results after execution finishes.
+
+```python title="my_installed_agent.py"
+from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
+from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
+
+class MyInstalledAgent(BaseInstalledAgent):
+    async def install(self, environment: BaseEnvironment) -> None:
+        """
+        Install the agent in the environment. Use exec_as_root for system
+        packages and exec_as_agent for user-level installs.
+        """
+        await self.exec_as_root(environment, command="apt-get update && apt-get install -y curl")
+        await self.exec_as_agent(environment, command="pip install my-agent")
+
+    @with_prompt_template
+    async def run(
+        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+    ) -> None:
+        """
+        Run the agent in the environment. The @with_prompt_template decorator
+        automatically applies prompt template rendering to the instruction.
+        Use exec_as_agent to execute commands as the configured agent user.
+        """
+        await self.exec_as_agent(
+            environment,
+            command=f"my-agent run {shlex.quote(instruction)}",
+        )
+
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        """
+        Populate the context with the results of the agent execution.
+        Called after run() completes. Typically involves parsing trajectory files.
+        """
+        pass
+```
+
+#### The `exec_as_root` and `exec_as_agent` Helpers
+
+Both helpers handle logging, environment variable merging, `set -o pipefail`, and error handling automatically.
+
+- **`exec_as_root`** — runs a command as the container's root user. Use this for system-level installs (`apt-get`, system dependencies, etc.).
+- **`exec_as_agent`** — runs a command as the task's configured agent user (see [`agent.user` in task.toml](/tasks/task-format#agent)). Use this for everything the agent itself needs to do, including the main execution command.
+
+<Note>
+  The `@with_prompt_template` decorator on `run` automatically renders the instruction through any configured prompt template before passing it to the agent binary. Remove the decorator if you want to handle templating yourself.
+</Note>
+
+## Running a Custom Agent
+
+Once your agent class is defined, pass its module path and class name to `harbor run` using the `--agent` flag:
+
+```bash
+harbor run -d "<dataset@version>" --agent path.to.agent:SomeAgent
+```
+
+Harbor imports the module, instantiates the class, and wires it into the evaluation loop automatically.

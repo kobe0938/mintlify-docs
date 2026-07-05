@@ -1,0 +1,123 @@
+---
+title: "Running Agent Evaluations with Harbor"
+sidebarTitle: "Evals"
+description: "Run agent evaluations on registered benchmarks like Terminal-Bench and SWE-Bench, local task datasets, or custom tasks using the harbor run command."
+---
+
+The `harbor run` command is the primary entry point for evaluating agents. You point it at a dataset — a registered benchmark, a local directory of tasks, or a single task file — pair it with a model and agent, and Harbor handles the rest: resolving task definitions, spinning up sandboxes, running trials, and writing structured results to disk.
+
+## Running a registered benchmark
+
+Harbor resolves published datasets from its package registry. Use the `-d` flag with an `org/name` identifier to pull a registered benchmark and run it immediately.
+
+**Terminal-Bench:**
+
+```bash
+harbor run -d terminal-bench/terminal-bench-2 -m "<model>" -a "<agent>"
+```
+
+**SWE-Bench Verified:**
+
+```bash
+harbor run -d swe-bench/swe-bench-verified -m "<model>" -a "<agent>"
+```
+
+Harbor resolves package metadata and downloads task artifacts as needed. Omit the version tag to use the latest published dataset.
+
+To see all datasets available in the registry, run:
+
+```bash
+harbor dataset list
+```
+
+<Note>
+Datasets that contain tasks with `[environment].os = "windows"` require a Windows host running Docker Desktop in Windows container mode. If the daemon is in the wrong mode, Harbor fails fast at startup with a clear error.
+</Note>
+
+## Running a local dataset
+
+Point Harbor at a directory on your local filesystem to run a custom or in-progress dataset without publishing it to the registry first:
+
+```bash
+harbor run -p "<path/to/dataset>" -m "<model>" -a "<agent>"
+```
+
+This is useful for rapid iteration on new tasks before you are ready to publish.
+
+## Running a single task
+
+Pass a path to a single task file to run just that one trial — handy for debugging a specific task definition:
+
+```bash
+harbor run -p "<path/to/task>" -a "<agent>" -m "<model>"
+```
+
+## Using a job config file
+
+For repeatable or complex runs, define your evaluation configuration in a YAML file and pass it to `harbor run` with the `-c` flag. This captures all flags in a single, version-controllable file.
+
+```yaml title="job.yaml"
+dataset: terminal-bench/terminal-bench-2
+model: "<model>"
+agent: "<agent>"
+n: 16
+environment: daytona
+```
+
+Then run:
+
+```bash
+harbor run -c job.yaml
+```
+
+## Results file structure
+
+After a run completes, Harbor writes results to a `jobs/` directory in the current working directory. Each job gets its own subdirectory containing a job-level summary and one subdirectory per trial:
+
+```
+jobs/job-name
+├── config.json               # Job configuration
+├── result.json               # Aggregated job result
+├── trial-name
+│   ├── config.json           # Trial configuration
+│   ├── result.json           # Trial result
+│   ├── agent/                # Agent output (contents depend on agent implementation)
+│   │   ├── recording.cast
+│   │   └── trajectory.json
+│   └── verifier/             # Verifier output (contents depend on test.sh implementation)
+│       ├── ctrf.json
+│       ├── reward.txt
+│       ├── test-stderr.txt
+│       └── test-stdout.txt
+└── ...                       # Additional trial directories
+```
+
+See [Results](/run-jobs/results) for a full breakdown of each file and how to interpret reward values.
+
+## Viewing results in the web viewer
+
+Harbor ships a built-in web viewer for exploring job results. Launch it by pointing it at your `jobs` directory:
+
+```bash
+harbor view jobs
+```
+
+This starts a local web server at `http://127.0.0.1:8080` by default. From the viewer you can:
+
+- **Browse jobs** — Filter and search by agent, model, dataset, and date range.
+- **Inspect trials** — View trial results, rewards, durations, and errors for each task.
+- **View trajectories** — Step through the agent's execution including tool calls, observations, and multimodal content.
+- **Analyze performance** — See token usage, timing breakdowns, and verifier output.
+- **Compare jobs** — Select multiple jobs for a side-by-side comparison matrix across agent and model combinations.
+- **View artifacts** — Browse files collected from the sandbox after each trial.
+- **Generate summaries** — Use AI-powered summarization to analyze job failures.
+
+The viewer also supports keyboard navigation: use `j`/`k` to move between rows, `Enter` to open, and `Esc` to deselect.
+
+### `harbor view` options
+
+| Option | Description |
+|--------|-------------|
+| `--port`, `-p` | Port or port range to bind (e.g. `8080` or `8080-8089`). Default: `8080-8089` |
+| `--host` | Host address to bind the server to. Default: `127.0.0.1` |
+| `--dev` | Run the frontend in development mode with hot reloading |

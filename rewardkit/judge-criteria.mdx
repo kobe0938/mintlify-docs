@@ -1,0 +1,236 @@
+---
+title: "LLM and Agent Judge Criteria in Reward Kit"
+sidebarTitle: "Judge Criteria"
+description: "Configure LLM-as-a-judge and agent-as-a-judge evaluation in Reward Kit using TOML files. Grade code quality, correctness, and other subjective dimensions."
+---
+
+Judge criteria let you use an LLM or an agent CLI to evaluate an agent's workspace, configured entirely through TOML files. This makes rubrics trivial to read, reuse, and share across tasks — no Python required.
+
+## LLM Judge
+
+Point a TOML file at a model string and a list of files, then define each criterion with a description and a scoring type. Reward Kit sends the file contents and criteria to the model and normalizes the responses into scores:
+
+```toml title="tests/quality.toml"
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+files = ["/app/main.py", "/app/utils.py"]
+
+[[criterion]]
+description = "Is the code correct?"
+type = "binary"
+
+[[criterion]]
+description = "How readable is the code?"
+type = "likert"
+points = 5
+weight = 2.0
+
+[[criterion]]
+description = "Rate the test coverage on a scale from 0 to 100"
+type = "numeric"
+min = 0
+max = 100
+```
+
+The `judge` field accepts any [LiteLLM model string](https://docs.litellm.ai/docs/providers). You can override it at invocation time without editing the rubric — see [Provider routing](/rewardkit/overview#provider-routing).
+
+## Agent Judge
+
+Agent judges shell out to a CLI like Claude Code or Codex. Unlike LLM judges, they can explore the filesystem and run commands before answering:
+
+```toml title="tests/review.toml"
+[judge]
+judge = "claude-code"
+model = "anthropic/claude-sonnet-4-6"
+isolated = true
+
+[[criterion]]
+description = "Does the solution handle edge cases?"
+type = "binary"
+```
+
+<Info>
+  Agent judges are slower and more expensive than LLM judges but can interact with the workspace directly — browsing files, running tests, and inspecting outputs before scoring.
+</Info>
+
+Set `isolated = true` so the agent cannot modify the workspace during evaluation. This uses overlayfs to mount the workspace read-only, with any writes going to a temporary layer that is discarded after the judge completes.
+
+### MCP Servers
+
+Register MCP servers for an agent judge using `[[judge.mcp_servers]]` entries. Each entry matches the shape of a Harbor task's `[[environment.mcp_servers]]`. Use `allowed_tools` to restrict which tools the judge may call — omit it to allow all tools the server exposes:
+
+```toml title="tests/review.toml"
+[judge]
+judge = "claude-code"
+
+[[judge.mcp_servers]]
+name = "playwright"
+transport = "stdio"
+command = "npx"
+args = ["@playwright/mcp@latest", "--headless", "--isolated"]
+allowed_tools = ["navigate", "click"]
+
+[[criterion]]
+description = "Does the rendered page match the spec?"
+type = "binary"
+```
+
+<Note>
+  `codex` ignores `allowed_tools` and does not support `sse` servers.
+</Note>
+
+## Individual Mode
+
+By default, all criteria in a TOML file are evaluated in a single batched call. Set `mode = "individual"` to grade one criterion per call instead. For LLM judges, each criterion can also declare its own `files`:
+
+```toml title="tests/quality.toml"
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+mode = "individual"
+
+[[criterion]]
+description = "Is the analysis correct?"
+files = ["/app/analysis.pdf"]
+
+[[criterion]]
+description = "Is the spreadsheet well-structured?"
+files = ["/app/data.xlsx"]
+```
+
+Criteria that omit `files` fall back to `[judge].files`. If a judge call times out, Reward Kit records the affected criteria as `0.0` with an error and warning in `reward-details.json`.
+
+## Configuration Reference
+
+### `[judge]` Section
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `judge` | `string` | `"anthropic/claude-sonnet-4-6"` | LiteLLM model name (e.g. `"anthropic/claude-sonnet-4-6"`) or agent name (`"claude-code"`, `"codex"`) |
+| `model` | `string \| null` | `null` | For agent judges, the LLM the agent should use |
+| `files` | `list[string]` | `[]` | Workspace file paths to include in the judge prompt |
+| `mode` | `"batched" \| "individual"` | `"batched"` | Evaluate all criteria in one call, or one call per criterion |
+| `timeout` | `integer` | `300` | Seconds to wait for the judge response |
+| `reasoning_effort` | `"low" \| "medium" \| "high"` | `"medium"` | Effort level for LLM judges |
+| `isolated` | `boolean` | `false` | For agent judges, mount the workspace read-only via overlayfs |
+| `mcp_servers` | `list[table]` | `[]` | For agent judges, MCP servers to register before running |
+| `reference` | `string \| null` | `null` | Path to a reference solution file for comparison |
+| `atif-trajectory` | `string \| null` | `null` | Path to an ATIF trajectory JSON to include in the prompt |
+| `weight` | `number` | `1.0` | Weight of this judge's score when averaging with other criteria in the same directory |
+| `prompt_template` | `string \| null` | `null` | Custom prompt template (`.md` or `.txt`). Must contain a `{criteria}` placeholder |
+
+### `[[criterion]]` Entries
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `description` | `string` | *(required)* | What to evaluate — this text is sent to the judge |
+| `type` | `"binary" \| "likert" \| "numeric"` | `"binary"` | Output format |
+| `name` | `string \| null` | `null` | Identifier for this criterion. Auto-generated from description if omitted |
+| `id` | `string \| null` | `null` | Stable rubric identifier carried through to `reward-details.json` (e.g. `"1.1"`, `"2.3"`). Survives rewording the description |
+| `points` | `integer` | `5` | Scale size for `likert` type |
+| `min` | `number` | `0.0` | Minimum value for `numeric` type |
+| `max` | `number` | `1.0` | Maximum value for `numeric` type |
+| `weight` | `number` | `1.0` | Importance multiplier for score aggregation |
+| `files` | `list[string]` | `[]` | Files scoped to this criterion. Requires `[judge].mode = "individual"`. Falls back to `[judge].files` when omitted |
+| `negate` | `boolean` | `false` | Invert the normalized score. Use for a criterion describing behavior the answer should NOT exhibit |
+| `optional` | `boolean` | `false` | Exempt this criterion from gating under `aggregation = "required_pass"` |
+
+### `[scoring]` Section
+
+The `[scoring]` section controls how the judge's criteria are aggregated into a single score. This only affects criteria within the same TOML file — it does not change how programmatic and judge scores are combined across the directory:
+
+```toml
+[scoring]
+aggregation = "all_pass"  # weighted_mean | all_pass | any_pass | threshold | required_pass
+threshold = 0.7           # only used with "threshold" aggregation
+```
+
+| Mode | Behavior |
+|---|---|
+| `weighted_mean` | Weighted average of all criterion scores (default) |
+| `all_pass` | Returns `1.0` only if every criterion scores `1.0` |
+| `any_pass` | Returns `1.0` if at least one criterion scores `1.0` |
+| `threshold` | Returns `1.0` if the weighted mean meets or exceeds `threshold` |
+| `required_pass` | Returns `1.0` only when every non-`optional` criterion passes (`value > 0`); warns and scores `0.0` if no non-optional criteria exist |
+
+## Score Normalization
+
+Reward Kit normalizes all criterion types to the `[0, 1]` range before aggregation:
+
+- **Binary** — `yes` / `true` / `1` → `1.0`, anything else → `0.0`
+- **Likert** — `(raw - 1) / (points - 1)`
+- **Numeric** — `(raw - min) / (max - min)`
+
+## Negated Criteria
+
+Set `negate = true` for a criterion that describes behavior the answer should **not** exhibit. The judge scores presence as usual, then the score is inverted (`value → 1 - value`): present → `0.0`, absent → `1.0`. The raw judge answer is kept in `reward-details.json` so the inversion is auditable:
+
+```toml
+[[criterion]]
+description = "States there is no task execution history tracking in the database"
+type = "binary"
+negate = true   # the answer should NOT make this (false) claim
+```
+
+## Trajectory Evaluation
+
+To evaluate the agent's process rather than just its output, point the judge at the agent's trajectory file. The trajectory content is truncated proportionally to fit within the model's context window while preserving all steps:
+
+```toml
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+atif-trajectory = "/logs/trajectory.json"
+files = ["/app/main.py"]
+
+[[criterion]]
+description = "Did the agent take an efficient approach?"
+type = "likert"
+points = 5
+```
+
+## Custom Prompt Templates
+
+Replace the built-in prompt with your own by pointing `prompt_template` at a `.md` or `.txt` file. The template must contain a `{criteria}` placeholder where criterion descriptions will be injected:
+
+```toml
+[judge]
+judge = "anthropic/claude-sonnet-4-6"
+prompt_template = "my_prompt.md"
+```
+
+## Optional Criteria
+
+Mark a criterion as `optional = true` to prevent it from gating the overall score under `required_pass` aggregation. Optional criteria still contribute to the weighted mean — they only lose their veto power:
+
+```toml
+[scoring]
+aggregation = "required_pass"
+
+[[criterion]]
+description = "Is the solution functionally correct?"
+type = "binary"
+
+[[criterion]]
+description = "Is the code well-documented?"
+type = "binary"
+optional = true   # does not gate the pass/fail outcome
+```
+
+## Provider Routing
+
+Override the judge model at invocation time without editing your TOML rubric:
+
+```bash
+# Use a different LLM judge
+rewardkit /tests --judge bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+
+# Use an agent judge with a specific model
+rewardkit /tests --judge claude-code --model anthropic/claude-sonnet-4-6
+```
+
+Set `REWARDKIT_JUDGE` in the environment for the same effect. Harbor users can pass `--ve REWARDKIT_JUDGE=...` to override the judge at task launch time without touching the rubric files.
+
+### Subscription Auth
+
+For Anthropic LLM judge models, Reward Kit uses a Claude subscription token when it is the only Anthropic credential present. Create one with `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN`. When both `ANTHROPIC_API_KEY` and the token are set, the API key takes priority — set `REWARDKIT_FORCE_OAUTH=1` to prefer the subscription token.
+
+For the `codex` agent judge, set `CODEX_ACCESS_TOKEN` to a ChatGPT access token (created by Business/Enterprise workspace admins at chatgpt.com/admin/access-tokens). Reward Kit logs the CLI in with it before grading. `OPENAI_API_KEY` has priority when both are set — set `REWARDKIT_FORCE_OAUTH=1` to prefer the access token.

@@ -1,0 +1,133 @@
+---
+title: "Publishing Tasks to the Harbor Registry"
+sidebarTitle: "Publishing"
+description: "Share your Harbor tasks with your organization or the public by publishing to the Harbor registry. Learn how to version, tag, and distribute tasks."
+---
+
+Publishing a task makes it available in the [Harbor registry](https://hub.harborframework.com/) so that anyone — or just your organization — can run it without needing a local copy of the task directory. Published tasks are versioned and tagged, making it easy to distribute stable benchmarks or share work in progress.
+
+<Tip>
+  Want your coding agent to walk you through the publishing flow interactively? Install the `publish` skill:
+
+  ```bash
+  npx skills add harbor-framework/harbor --skill publish
+  ```
+</Tip>
+
+## Prerequisites
+
+### Log in to the Harbor registry
+
+Before you can publish, authenticate with the registry:
+
+```bash
+harbor auth login
+```
+
+This opens a GitHub sign-in flow and creates your Harbor account. New accounts get an organization using your GitHub username by default. You can publish to any organization you own; if you publish to an organization that does not yet exist, Harbor creates it for you.
+
+Verify that you are signed in at any time:
+
+```bash
+harbor auth status
+```
+
+### Update tasks created before March 30, 2026
+
+Task identifiers are specified in `task.toml` as `<org>/<name>` under the `[task]` section. If your task was created before this requirement was introduced, add the `[task]` section by running:
+
+```bash
+harbor task update "<path/to/task>" --org "<org>"
+```
+
+This command adds the `[task]` section with the name `<org>/<folder-name>`. Use your company name, team name, or benchmark name as the org.
+
+To update an entire directory of tasks at once, add the `--scan` flag:
+
+```bash
+harbor task update "<path/to/tasks>" --org "<org>" --scan
+```
+
+## Publishing a task
+
+<Steps>
+  <Step title="Publish with harbor publish">
+    Run `harbor publish` with the path to your task directory:
+
+    ```bash
+    harbor publish "<path/to/task>"
+    ```
+
+    Harbor computes the task archive, resolves the metadata and digest from `task.toml`, and registers the version in the registry. The output includes a link to the task's registry page.
+  </Step>
+  <Step title="Add tags and set visibility">
+    By default, tasks are published as **private** with the `latest` tag. Use flags to customize:
+
+    ```bash
+    # Add a custom tag and make the task public
+    harbor publish "<path/to/task>" -t benchmark-baseline --public
+
+    # Add multiple tags
+    harbor publish "<path/to/task>" -t v1.0 -t stable --public
+    ```
+
+    | Flag | Description |
+    |---|---|
+    | `-t / --tag` | Add one or more tags (repeatable). `latest` is always included. |
+    | `--public` | Make the task visible and runnable by everyone. Private is the default. |
+    | `-c / --concurrency` | Control upload concurrency for large task archives. |
+  </Step>
+  <Step title="Publish multiple tasks">
+    Publish several tasks in a single command by listing their paths:
+
+    ```bash
+    harbor publish "<path/to/task-a>" "<path/to/task-b>"
+    ```
+
+    Publish all tasks in a directory at once:
+
+    ```bash
+    harbor publish "<path/to/tasks>"
+    ```
+  </Step>
+</Steps>
+
+## Visibility: public vs private
+
+| Visibility | Who can see and run the task |
+|---|---|
+| **Public** | Everyone with access to the Harbor registry |
+| **Private** | Only members of the publishing organization |
+
+By default, `harbor publish` creates a private task. Pass `--public` to make it public at publish time. You can change visibility later using the CLI or through the registry website:
+
+```bash
+harbor task visibility "<org>/<name>" --public
+```
+
+Or visit [hub.harborframework.com](https://hub.harborframework.com/) and update visibility from your task's settings page.
+
+## Running a published task
+
+Anyone with access to a published task can run it using its registry identifier — no local copy needed:
+
+```bash
+harbor run -p "<org>/<name>" -a "<agent>" -m "<model>"
+```
+
+For a specific tagged version:
+
+```bash
+harbor run -p "<org>/<name>:v1.0" -a "<agent>" -m "<model>"
+```
+
+## What harbor publish does
+
+When you run `harbor publish`, Harbor:
+
+1. Computes and uploads the task archive (all files in the task directory).
+2. Resolves the task name, description, authors, and keywords from `task.toml`.
+3. Computes a content digest for the uploaded archive.
+4. Registers the version — along with any tags you specified — in the Harbor registry.
+
+The registry page for your task displays the digest, tags, publish date, and a ready-to-use `harbor run` command.

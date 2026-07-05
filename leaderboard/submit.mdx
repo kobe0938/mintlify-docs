@@ -1,0 +1,183 @@
+---
+title: "Submit Results to the Harbor Leaderboard"
+sidebarTitle: "Submit"
+description: "Submit your Harbor evaluation results to the public leaderboard to benchmark your agent against others on Terminal-Bench and other registered datasets."
+---
+
+The Harbor leaderboard lets you benchmark your agent against others on standardized datasets. After you finish a run and upload the job to [Harbor Hub](https://hub.harborframework.com/), use `harbor leaderboard submit` to enter the official review queue. Harbor validates your job against the leaderboard rules and either accepts it as a pending submission or tells you exactly what to fix.
+
+<Note>
+  **Currently available leaderboard:** only `terminal-bench/terminal-bench-2-1` can be submitted through Harbor today. Additional leaderboards will be supported soon — use `--leaderboard` with the slug published for each benchmark when they launch.
+</Note>
+
+## Before you start
+
+<Note>
+  Sign in with `harbor auth login`, finish your eval run, and upload the job with `harbor upload`. You need the job ID from the upload output and a `metadata.yaml` file that describes your agent and models.
+</Note>
+
+## Workflow
+
+The full submission process follows three steps:
+
+<Steps>
+  <Step title="Run the benchmark">
+    Use the dataset and settings required by the leaderboard. Most leaderboards require at least five attempts per task — pass `-k 5` (or higher) when that applies.
+
+    ```bash
+    harbor run -d terminal-bench/terminal-bench-2-1 -a claude-code -m anthropic/claude-opus-4-1 -k 5
+    ```
+  </Step>
+  <Step title="Upload the job">
+    Upload so Harbor Hub has your config, results, and trial artifacts.
+
+    ```bash
+    harbor upload jobs/<job_name>/
+    ```
+
+    When the upload finishes, note the job ID in the **View at** link — it is the UUID at the end of the URL.
+  </Step>
+  <Step title="Submit to the leaderboard">
+    Pass the job ID, the leaderboard slug, and your metadata file.
+
+    ```bash
+    harbor leaderboard submit \
+      --leaderboard terminal-bench/terminal-bench-2-1 \
+      --job-id <JOB_UUID> \
+      --metadata ./metadata.yaml
+    ```
+
+    If submission succeeds, the CLI prints a **submission ID**. The submission stays pending until leaderboard admins review and publish it.
+  </Step>
+</Steps>
+
+## Authentication
+
+```bash
+harbor auth login
+harbor auth status
+```
+
+You must be signed in as the owner of every job you submit. Jobs created by another account cannot be attached to your submission.
+
+## Command reference
+
+```bash
+harbor leaderboard submit --help
+```
+
+| Flag | Short | When you need it | Description |
+|------|-------|------------------|-------------|
+| `--leaderboard` | `-l` | Always | Leaderboard slug (e.g. `terminal-bench/terminal-bench-2-1`). |
+| `--job-id` | `-j` | New submissions; adding jobs | Job ID from `harbor upload`. Use multiple times to attach several jobs in one submission. |
+| `--metadata` | `-m` | New submissions; changing metadata | Path to `metadata.yaml`. |
+| `--submission` | `-s` | Updating an existing entry | Submission ID from a previous successful submit. |
+| `--output` | `-o` | Optional | Save a detailed validation report as JSON. |
+
+### New submission
+
+```bash
+harbor leaderboard submit -l terminal-bench/terminal-bench-2-1 -j <JOB_UUID> -m ./metadata.yaml
+```
+
+### Add another job to a pending submission
+
+Use the same submission ID and pass an additional job ID. You do not need to pass metadata again unless you want to change it.
+
+```bash
+harbor leaderboard submit \
+  -l terminal-bench/terminal-bench-2-1 \
+  -s <SUBMISSION_UUID> \
+  -j <ANOTHER_JOB_UUID>
+```
+
+Every job on a submission must use the same dataset version. Trial count and coverage rules apply across all jobs on the submission combined.
+
+### Update metadata only
+
+```bash
+harbor leaderboard submit -l terminal-bench/terminal-bench-2-1 -s <SUBMISSION_UUID> -m ./metadata.yaml
+```
+
+## metadata.yaml
+
+Describe the agent and models you evaluated. Harbor checks the file format before submitting.
+
+```yaml
+agent_url: https://github.com/example/my-agent
+agent_display_name: My Agent
+agent_org_display_name: My Org
+
+models:
+  - model_name: claude-opus-4-1
+    model_provider: anthropic
+    model_display_name: Claude Opus 4.1
+    model_org_display_name: Anthropic
+```
+
+| Field | Description |
+|-------|-------------|
+| `agent_url` | Link to your agent (repository or product page). |
+| `agent_display_name` | Name shown on the leaderboard. |
+| `agent_org_display_name` | Organization shown for the agent. |
+| `models` | One or more models used in the run. Each entry needs `model_name`, `model_provider`, `model_display_name`, and `model_org_display_name`. |
+
+The metadata file can live anywhere on disk — Harbor does not look for it automatically in the job folder.
+
+## Validation
+
+Harbor validates your submission before accepting it. Typical requirements include:
+
+- The leaderboard exists and your jobs belong to you.
+- Each job is uploaded with complete trial results for the leaderboard dataset.
+- Task versions match what the leaderboard dataset expects.
+- At least five trials per task (across all jobs on the submission when you attach more than one job).
+- Standard job and trial settings — no custom timeout or resource overrides.
+- Trajectories for passing trials, when the leaderboard requires them.
+
+If validation fails, the CLI lists the specific issues. Fix the underlying run or upload, then submit again.
+
+When validation passes you may see an **unofficial accuracy** figure based on completed trials. This number is informational only — admins still review the full submission.
+
+After static validation, Harbor Hub queues **dynamic validation** (LLM analysis of trajectories) on a separate worker service. Until it completes, `dynamic_status` on the submission may stay `pending` or `running`.
+
+To save a copy of the full validation report:
+
+```bash
+harbor leaderboard submit -l terminal-bench/terminal-bench-2-1 -j <JOB_UUID> -m ./metadata.yaml -o ./validation-report.json
+```
+
+## After a successful submit
+
+- Your job is linked to the pending submission and made **public** so reviewers can inspect it.
+- You can add more jobs to the same pending submission with `--submission` and another `--job-id`.
+- You generally **cannot edit or delete** a job after it is part of a submission. Upload corrections as a new job and attach it, or start a new submission if the leaderboard allows it.
+
+Only **pending** submissions can be updated. Published or rejected submissions cannot be changed.
+
+## Multiple jobs in one submission
+
+Shard a large run, rerun failed tasks, or upload results incrementally:
+
+```bash
+harbor leaderboard submit -l terminal-bench/terminal-bench-2-1 -j <JOB_A> -j <JOB_B> -m ./metadata.yaml
+```
+
+Alternatively, attach jobs one at a time using the same `--submission` ID. Minimum trials per task and dataset consistency are evaluated over the combined set of jobs.
+
+## Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| Not authenticated | Run `harbor auth login`. |
+| No leaderboard matches slug | Check the slug matches Harbor Hub exactly (e.g. `terminal-bench/terminal-bench-2-1`). |
+| Job not found or not accessible | Confirm the job ID from your upload and that you own the job. |
+| No trials uploaded | Upload the job again and ensure trials finished successfully. |
+| Already linked to another pending submission | That job is already on a different open submission. Finish or withdraw that submission first, or submit a different job. |
+| Minimum trials per task | Run more trials per task (often at least five) on the correct dataset version, then upload and submit again. |
+| Different dataset version than the submission | All jobs on one submission must use the same dataset revision. Check `config.json` and dataset pins on each job. |
+
+## See also
+
+- [Running Terminal-Bench](/tutorials/running-terminal-bench)
+- [Sharing Jobs](/sharing/jobs)

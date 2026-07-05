@@ -1,69 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Harbor",
+  "projectType": "framework",
+  "projectName": "Harbor",
+  "projectDescription": "A framework for evaluating and optimizing AI agents and models in containerized environments, supporting benchmarks, RL training, and SFT dataset generation.",
   "theme": "luma",
-  "colors": {
-    "primary": "#111111",
-    "light": "#3F3F46",
-    "dark": "#F4F4F5"
-  },
-  "favicon": "/favicon.svg",
-  "appearance": {
-    "default": "system"
-  },
-  "fonts": {
-    "family": "Inter"
-  },
-  "icons": {
-    "library": "lucide"
-  },
-  "background": {
-    "decoration": "grid",
-    "color": {
-      "light": "#FAFAFA",
-      "dark": "#09090B"
-    }
-  },
-  "styling": {
-    "eyebrows": "breadcrumbs",
-    "codeblocks": "system"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/laude-institute/harbor"
-    },
-    "links": [
-      {
-        "label": "Discord",
-        "href": "https://discord.gg/6xWPKhGDbA"
-      },
-      {
-        "label": "Hub",
-        "href": "https://hub.harborframework.com"
-      }
-    ]
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/laude-institute/harbor",
-      "discord": "https://discord.gg/6xWPKhGDbA"
-    },
-    "links": [
-      {
-        "header": "Community",
-        "items": [
-          { "label": "GitHub", "href": "https://github.com/laude-institute/harbor" },
-          { "label": "Discord", "href": "https://discord.gg/6xWPKhGDbA" },
-          { "label": "Hub", "href": "https://hub.harborframework.com" }
-        ]
-      }
-    ]
-  },
-  "contextual": {
-    "options": ["copy", "view", "claude", "chatgpt"],
-    "display": "header"
-  },
+  "primaryColor": "#111111",
+  "lightColor": "#3F3F46",
+  "darkColor": "#F4F4F5",
   "navigation": {
     "tabs": [
       {
@@ -162,5 +104,34 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Run evals on popular benchmarks (Terminal-Bench, SWE-Bench) with a single CLI command",
+    "Horizontal scaling via cloud sandbox providers (Daytona, Modal, E2B, Runloop, and more)",
+    "Pre-integrated popular agents: Terminus-2, Claude Code, Gemini CLI, Codex CLI, OpenHands, and more",
+    "Flexible task format with Docker-based environments, test scripts, and reward files",
+    "Reward Kit for defining programmatic and LLM-as-judge verifiers",
+    "SFT dataset export from agent trajectories with Hugging Face Hub push support",
+    "RL rollout interface with support for SkyRL and vLLM-based training workflows",
+    "Harbor Hub for storing, sharing, and comparing evaluation jobs",
+    "Skills system for injecting reusable context into agent trials",
+    "Multi-step tasks, network policies, and resource management per task"
+  ],
+  "publicApiSurface": [
+    "harbor run -d <org/dataset> -m <model> -a <agent>",
+    "harbor dataset list",
+    "harbor init --task <org/name>",
+    "harbor view jobs",
+    "harbor traces export",
+    "harbor sweeps run",
+    "harbor hub job list",
+    "harbor hub job show <job_id>",
+    "harbor hub job compare <job_id_1> <job_id_2>",
+    "BaseAgent (Python interface)",
+    "BaseInstalledAgent (Python interface)",
+    "JobConfig / TrialConfig / TaskConfig (Python classes)",
+    "rewardkit CLI and Python API (rk.run, rk.discover, @criterion decorator)",
+    "task.toml configuration schema",
+    "ATIF trajectory format"
+  ]
 }

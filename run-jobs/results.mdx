@@ -1,0 +1,90 @@
+---
+title: "Job Results, Artifacts, and the Results Viewer"
+sidebarTitle: "Results"
+description: "Understand Harbor job and trial result files, browse evaluation artifacts, and use the built-in web viewer to inspect agent trajectories and compare runs."
+---
+
+After every `harbor run` invocation, Harbor writes a structured set of result files to a `jobs/` directory in your current working directory. Each job gets a named subdirectory containing a high-level summary alongside one subdirectory per trial. Understanding this layout makes it easy to script over results, debug failures, and feed data into external analysis tools.
+
+## File structure
+
+The `jobs/` directory follows this layout:
+
+```
+jobs/job-name
+├── config.json               # Job configuration snapshot
+├── result.json               # Aggregated job result
+├── trial-name
+│   ├── config.json           # Trial configuration snapshot
+│   ├── result.json           # Trial result
+│   ├── agent/                # Agent output (contents vary by agent implementation)
+│   │   ├── recording.cast
+│   │   └── trajectory.json
+│   └── verifier/             # Verifier output (contents vary by test.sh implementation)
+│       ├── ctrf.json
+│       ├── reward.txt
+│       ├── test-stderr.txt
+│       └── test-stdout.txt
+└── ...                       # Additional trial directories
+```
+
+- **`config.json`** — A full snapshot of the configuration used for the job or trial. Useful for reproducing a run exactly.
+- **`result.json`** — The aggregated result at the job level, or the per-trial outcome at the trial level.
+- **`agent/`** — Files produced by the agent during execution. Common outputs include an `asciinema` terminal recording (`recording.cast`) and a structured log of tool calls and observations (`trajectory.json`).
+- **`verifier/`** — Files produced by the verifier's `test.sh` script. The exact contents depend on your task implementation.
+
+## Reward values
+
+The verifier writes its reward signal to the `verifier/` directory after each trial:
+
+- **`reward.txt`** — A plain floating-point value between `0.0` and `1.0` representing the trial score.
+- **`reward.json`** — Present when the task reports multiple metrics. Contains a JSON object with named metric keys alongside a primary `reward` field.
+
+## Artifact collection
+
+In addition to the standard result files, Harbor can collect arbitrary files from inside the sandbox after each trial. Any files written to `/logs/verifier/` or `/logs/agent/` inside the sandbox are automatically downloaded to the corresponding `verifier/` or `agent/` subdirectory on the host — no configuration required.
+
+For more advanced collection scenarios — pulling files from arbitrary paths, collecting from Docker Compose sidecar services, or customizing where files land on the host — you can declare an `artifacts` block in your `job.yaml`:
+
+```yaml title="job.yaml"
+artifacts:
+  - /app/output.csv
+  - source: /var/log/api/requests.log
+    service: api
+```
+
+<Note>
+Artifact collection is best-effort. A failure to collect a file is recorded in `artifacts/manifest.json` but never causes the trial itself to fail.
+</Note>
+
+## Web viewer
+
+Harbor ships a built-in web viewer for exploring results without writing any code. Launch it by pointing it at your `jobs` directory:
+
+```bash
+harbor view jobs
+```
+
+This starts a local web server at `http://127.0.0.1:8080` by default. From the viewer you can:
+
+- **Browse jobs** — Filter and search by agent, model, dataset, and date range.
+- **Inspect trials** — View per-trial results, rewards, durations, and error messages.
+- **View trajectories** — Step through the agent's execution including tool calls, observations, and multimodal content (text and images).
+- **Analyze performance** — Explore token usage breakdowns, timing metrics (environment setup, agent execution, verification), and raw verifier output.
+- **Compare jobs** — Select multiple jobs to display a side-by-side comparison matrix across agent and model combinations.
+- **View artifacts** — Browse files collected from the sandbox, including terminal recordings and generated outputs.
+- **Generate summaries** — Use AI-powered summarization to identify patterns in job failures.
+
+The viewer supports keyboard navigation: `j`/`k` to move between rows, `Enter` to open, and `Esc` to deselect.
+
+### `harbor view` options
+
+| Option | Description |
+|--------|-------------|
+| `--port`, `-p` | Port or port range to bind (e.g. `8080` or `8080-8089`). Default: `8080-8089` |
+| `--host` | Host address to bind the server to. Default: `127.0.0.1` |
+| `--dev` | Run the frontend in development mode with hot reloading |
+
+<Tip>
+To share results with teammates, pass `--host 0.0.0.0` to bind to all interfaces, then share your machine's IP. For persistent sharing, copy the `jobs/` directory to a shared volume or object store and run `harbor view` from there.
+</Tip>

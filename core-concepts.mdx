@@ -1,0 +1,117 @@
+---
+title: "Harbor Core Concepts: Tasks, Datasets, Jobs & Agents"
+sidebarTitle: "Core Concepts"
+description: "Learn the fundamental building blocks of Harbor: tasks, datasets, agents, environments, trials, and jobs — and how they fit together in an evaluation run."
+---
+
+Before you dive into running evaluations or building custom tasks, it helps to understand the six building blocks that make up every Harbor workflow. This page defines each concept, explains how it relates to the others, and points you toward the relevant documentation for going deeper.
+
+## Task
+
+A task is the atomic unit of evaluation in Harbor. It packages three things together: a natural-language instruction that the agent must complete, a Docker-based container environment in which the agent operates, and a test script that grades the result. Harbor expects each task to live in its own directory structured according to the [Harbor task format](/tasks/overview).
+
+When a trial runs, Harbor spins up the container defined by the task, hands the instruction to the agent, and then executes the test script to produce a reward score.
+
+<Tip>
+  Tasks are portable. You can share them with the community by publishing them to the Harbor registry, or keep them private in a local directory and reference them with `harbor run -p`.
+</Tip>
+
+## Dataset
+
+A dataset is an ordered collection of tasks. In practice, a dataset usually corresponds to a benchmark — Terminal-Bench and SWE-Bench Verified are two common examples. Harbor maintains a central registry of popular datasets that you can list and download automatically:
+
+```bash
+harbor dataset list
+```
+
+Datasets in the registry use an `org/name` identifier (for example, `terminal-bench/terminal-bench-2`). You can also create and run local datasets by pointing `harbor run` at any directory of tasks on your filesystem.
+
+See [Datasets](/datasets/overview) for instructions on building, registering, and versioning your own datasets.
+
+## Agent
+
+An agent is the program that receives a task instruction and attempts to complete it inside the container environment. Harbor pre-integrates the most widely used CLI agents so you can start benchmarking immediately:
+
+| Agent | Flag |
+|---|---|
+| Terminus-2 | `terminus-2` |
+| Claude Code | `claude-code` |
+| Gemini CLI | `gemini` |
+| Codex CLI | `codex` |
+| OpenHands | `openhands` |
+
+If none of these fit your needs, you can implement a custom agent by subclassing `BaseAgent` or `BaseInstalledAgent`. Each task can also control which OS user the agent runs as by setting `agent.user` in `task.toml`, which is useful for privilege-separation scenarios.
+
+See [Agents](/agents/overview) for the full integration guide and interface reference.
+
+## Container environment
+
+Every task runs inside a Docker container. The container image is typically defined by a `Dockerfile` that lives alongside the task files. Harbor exposes a `BaseEnvironment` interface that provides a unified API for interacting with the container — executing commands, reading files, and resetting state — regardless of where the container is actually running.
+
+Out of the box, Harbor supports the following container runtimes and cloud sandbox providers:
+
+- **Local Docker** — the default; no configuration required
+- **Daytona**, **Modal**, **E2B**, **Runloop**, **Tensorlake**, **LangSmith**, **Blaxel**, **EC2**, **Beam** — cloud providers for horizontal scaling
+
+You can target a specific runtime at job time using the `--env` flag. The target operating system defaults to Linux but can be set to Windows per task via `[environment].os = "windows"` in `task.toml`.
+
+<Note>
+  Cloud environments turn trials from compute-bound to I/O-bound workloads. This unlocks high concurrency — you can run dozens of trials simultaneously without saturating local CPU. We recommend a cloud provider for any dataset with more than a handful of tasks.
+</Note>
+
+## Trial
+
+A trial is one agent's attempt at one task. It is the unit of work that Harbor schedules and executes. Each trial:
+
+1. Starts a fresh container from the task's image.
+2. Passes the task instruction to the agent.
+3. Lets the agent operate until it signals completion or a timeout is reached.
+4. Runs the task's test script and records the result as a **reward** — a float between `0.0` (complete failure) and `1.0` (complete success).
+
+Trials are configured using the `TrialConfig` class and are generated automatically by Harbor when you run a job. You generally do not create `TrialConfig` objects directly unless you are building advanced tooling on top of Harbor's Python API.
+
+## Job
+
+A job is a collection of trials. When you run `harbor run`, you are creating a job. A job can span multiple datasets, agents, models, and tasks in a single invocation. Under the hood, Harbor generates a `TrialConfig` for every combination you specify and runs them in parallel according to your concurrency settings.
+
+You can configure a job in two ways:
+
+**Using a config file** — define a `job.yaml` (or `job.json`) that declares all datasets, agents, models, and trial settings, then run:
+
+```bash
+harbor run -c job.yaml
+```
+
+**Using CLI flags** — pass options directly to `harbor run` for quick, ad-hoc jobs:
+
+```bash
+harbor run -d terminal-bench/terminal-bench-2 -m "openai/o3" -a "terminus-2"
+```
+
+After a job finishes, inspect the results with:
+
+```bash
+harbor view jobs
+```
+
+<Info>
+  Jobs are the natural boundary for experiment tracking. Each job gets a unique ID, and Harbor stores per-trial rewards alongside agent logs so you can reproduce and compare runs.
+</Info>
+
+## How the concepts fit together
+
+The diagram below shows the relationship between all six concepts in a typical Harbor workflow:
+
+```text
+Dataset  ─────►  [ Task, Task, Task, … ]
+                        │
+                   Container env  ◄──  Dockerfile
+                        │
+                      Trial  ◄──────── Agent + Model
+                        │
+                      reward (0–1)
+                        │
+Job  ◄──────────  [ Trial, Trial, … ]
+```
+
+A **job** fans out across a **dataset**, pairing each **task** (which carries its own **container environment**) with the specified **agent** to produce individual **trials**. Each trial records a **reward**, and the job aggregates those rewards into your benchmark score.
