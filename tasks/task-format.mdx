@@ -65,9 +65,20 @@ gpus = 0
 gpu_types = ["H100", "A100"]
 env = { SOME_ENV_VAR = "${SOME_ENV_VAR}" }
 
-[environment.tpu]
-type = "v6e"
-topology = "2x4"
+[environment.tpu]                   # optional; GKE only
+type = "v6e"                        # alias (v3, v4, v5e, v5p, v6e, v7, trillium, ironwood) or canonical GKE label
+topology = "2x4"                    # required; per-pod chip count = product of dimensions (here, 8)
+
+[environment.healthcheck]           # optional; runs after env start, before agent begins
+command = "curl -f http://localhost:8080/health"
+interval_sec = 5.0
+timeout_sec = 30.0
+retries = 3
+
+[[environment.mcp_servers]]         # optional; MCP servers made available to the agent
+name = "mcp-server"
+transport = "streamable-http"
+url = "http://mcp-server:8000/mcp"
 ```
 
 ### `schema_version`
@@ -95,6 +106,7 @@ Arbitrary key-value pairs provided by the task author. Harbor does not interpret
 | `env` | `object` | `{}` | Environment variables injected when running the verifier |
 | `user` | `string \| int \| null` | `null` | OS user to run the verifier as (defaults to container default) |
 | `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Optional network override during `verify()` |
+| `allowed_hosts` | `list[string] \| null` | `null` | Allowlist of hostnames when `network_mode` is `"allowlist"`. Accepts exact hostnames, IPv4/IPv6 address literals, or leading wildcard patterns (e.g. `*.example.com`). |
 | `environment_mode` | `"shared" \| "separate" \| null` | `null` | Where the verifier runs — see [Verifier environments](#verifier-environments-shared-vs-separate) |
 | `environment` | `EnvironmentConfig \| null` | `null` | Dedicated container for the verifier |
 
@@ -105,6 +117,7 @@ Arbitrary key-value pairs provided by the task author. Harbor does not interpret
 | `timeout_sec` | `number \| null` | `null` | Maximum seconds the agent may run (no timeout when omitted) |
 | `user` | `string \| int \| null` | `null` | OS user to run the agent as |
 | `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Optional network override during `agent.run()` |
+| `allowed_hosts` | `list[string] \| null` | `null` | Allowlist of hostnames when `network_mode` is `"allowlist"`. Accepts exact hostnames, IPv4/IPv6 address literals, or leading wildcard patterns (e.g. `*.example.com`). |
 
 ### `[solution]`
 
@@ -120,12 +133,37 @@ Arbitrary key-value pairs provided by the task author. Harbor does not interpret
 | `docker_image` | `string \| null` | `null` | Pre-built image to use; omit the Dockerfile when set |
 | `os` | `"linux" \| "windows"` | `"linux"` | Target container OS |
 | `network_mode` | `"no-network" \| "public" \| "allowlist" \| null` | `null` | Baseline network policy (defaults to `"public"`) |
+| `allowed_hosts` | `list[string] \| null` | `null` | Allowlist of hostnames when `network_mode` is `"allowlist"`. Accepts exact hostnames, IPv4/IPv6 address literals, or leading wildcard patterns (e.g. `*.example.com`). |
 | `cpus` | `integer \| null` | `null` | CPU count requested |
 | `memory_mb` | `integer \| null` | `null` | RAM in megabytes |
 | `storage_mb` | `integer \| null` | `null` | Ephemeral disk in megabytes |
 | `gpus` | `integer \| null` | `null` | GPU count requested |
 | `gpu_types` | `list[string] \| null` | `null` | Acceptable GPU types (e.g., `["H100", "A100"]`) |
 | `env` | `object` | `{}` | Host environment variables resolved at runtime; supports `${VAR}` and `${VAR:-default}` syntax |
+| `mcp_servers` | `list[MCPServerConfig]` | `[]` | MCP servers made available to the agent. Each entry requires `name`, `transport` (`"sse"`, `"streamable-http"`, or `"stdio"`), and transport-specific fields (`url` for SSE/streamable-HTTP; `command`/`args` for stdio). Compatible agents register these automatically. |
+| `skills_dir` | `string \| null` | `null` | Path to a skills directory in the environment. Contents are copied to the agent's skills config directory. |
+| `source` | `string \| null` | `null` | Optional provenance string for the task (e.g. a dataset or benchmark identifier). |
+
+### `[environment.healthcheck]`
+
+An optional healthcheck that runs after environment start and confirms the container is ready before the agent begins.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `command` | `string` | — | Shell command to run; exit `0` means healthy |
+| `interval_sec` | `number` | `5.0` | Seconds between healthcheck attempts |
+| `timeout_sec` | `number` | `30.0` | Maximum seconds for a single healthcheck command |
+| `start_period_sec` | `number` | `0.0` | Grace period after environment start during which failures do not count |
+| `start_interval_sec` | `number` | `5.0` | Interval between checks during the start period |
+| `retries` | `integer` | `3` | Consecutive failures before the healthcheck is considered failed |
+
+```toml
+[environment.healthcheck]
+command = "curl -f http://localhost:8080/health"
+interval_sec = 5.0
+timeout_sec = 30.0
+retries = 3
+```
 
 ---
 

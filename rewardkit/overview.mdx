@@ -1,7 +1,7 @@
 ---
-title: "Reward Kit: Define Verifiers for Harbor Tasks"
+title: "Reward Kit: Build and Run Verifiers for Harbor Tasks"
 sidebarTitle: "Overview"
-description: "Reward Kit is a standalone Python package for building task verifiers. Use programmatic criteria, LLM judges, and weighted scoring to grade agent completions."
+description: "Standalone Python package for building task verifiers. Use programmatic criteria, LLM judges, and weighted scoring to grade agent task completions."
 ---
 
 Reward Kit is a standalone Python package for defining and running verifiers against an agent's workspace and trajectory. It has zero external dependencies, writes scores to a JSON file, and organizes criteria through directory structure — each folder maps to a reward, making verifiers easy to read, share, and extend. All criteria run in parallel by default.
@@ -218,7 +218,7 @@ Reward Kit writes two files side by side:
 
 ### Aggregating Dimensions
 
-To add aggregated scores on top of the per-dimension keys, create a root-level `tests/reward.toml` with one or more `[[reward]]` tables. Each table adds one key to `reward.json`, aggregating the per-dimension scores using the same modes available within a judge:
+To add aggregated scores on top of the per-dimension keys, create a root-level `tests/reward.toml` with one or more `[[reward]]` tables. Each table adds one key to `reward.json`, aggregating the per-dimension scores using the same modes used within a judge (`weighted_mean`, `all_pass`, `any_pass`, `threshold`):
 
 ```toml title="tests/reward.toml"
 [[reward]]

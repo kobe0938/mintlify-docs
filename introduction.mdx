@@ -24,7 +24,7 @@ Harbor gives you:
   <Card title="Run evals" icon="play" href="/run-jobs/evals">
     Execute evaluations against any registered or local dataset using a single `harbor run` command.
   </Card>
-  <Card title="Scale with cloud sandboxes" icon="cloud" href="/run-jobs/evals">
+  <Card title="Scale with cloud sandboxes" icon="cloud" href="/run-jobs/cloud-sandboxes">
     Offload container execution to Daytona, Modal, E2B, Runloop, Tensorlake, Blaxel, EC2, Beam, and more for massive parallelism.
   </Card>
   <Card title="Build custom tasks" icon="hammer" href="/tasks/overview">
@@ -33,11 +33,11 @@ Harbor gives you:
   <Card title="RewardKit" icon="star" href="/rewardkit/overview">
     Write reward functions that score agent output and plug directly into optimization pipelines.
   </Card>
-  <Card title="Train with RL and SFT" icon="brain" href="/run-jobs/evals">
+  <Card title="Train with RL and SFT" icon="brain" href="/training/rl">
     Use rollouts from Harbor jobs as training signal for reinforcement learning or supervised fine-tuning via SkyRL and GEPA integrations.
   </Card>
-  <Card title="Harbor Hub" icon="warehouse" href="/datasets/overview">
-    Browse and publish tasks and datasets to the shared Harbor registry, backed by the community.
+  <Card title="Harbor Hub" icon="warehouse" href="/hub/overview">
+    Browse and publish tasks and datasets to the shared Harbor registry.
   </Card>
 </CardGroup>
 
@@ -47,9 +47,11 @@ Harbor comes with pre-integrated support for the most widely used CLI agents so 
 
 - **Terminus-2** — Harbor's own high-performance terminal agent
 - **Claude Code** — Anthropic's agentic coding assistant
+- **Copilot CLI** — GitHub Copilot's command-line agent
 - **Gemini CLI** — Google's command-line agent
 - **Codex CLI** — OpenAI's terminal coding agent
 - **OpenHands** — the open-source generalist agent from All-Hands AI
+- **Mini-SWE-Agent** — a lightweight SWE-Agent variant for software engineering tasks
 
 You can also integrate any custom agent by implementing the `BaseAgent` or `BaseInstalledAgent` interface. See the [Agents](/agents/overview) documentation for details.
 

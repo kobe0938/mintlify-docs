@@ -1,5 +1,5 @@
 ---
-title: "Get Started with Harbor in Under 5 Minutes"
+title: "Harbor Quickstart: Run Your First Eval in 5 Minutes"
 sidebarTitle: "Quickstart"
 description: "Install Harbor, run your first agent evaluation on Terminal-Bench, and view results — all in under 5 minutes with a single CLI command."
 ---
@@ -62,9 +62,11 @@ Harbor gets you from zero to a running agent evaluation in a handful of commands
     |---|---|
     | `terminus-2` | Harbor's native terminal agent |
     | `claude-code` | Anthropic Claude Code |
+    | `copilot` | GitHub Copilot CLI |
     | `codex` | OpenAI Codex CLI |
     | `gemini` | Google Gemini CLI |
     | `openhands` | OpenHands generalist agent |
+    | `mini-swe-agent` | Mini-SWE-Agent for software engineering tasks |
 
     <Note>
       For large datasets or long-running agents, consider scaling horizontally with a cloud sandbox provider. Add `--env daytona -n 32` to run 32 trials concurrently on Daytona instead of your local machine. See the [cloud sandboxes](#scaling-with-cloud-sandboxes) note below for more detail.
@@ -101,5 +103,5 @@ This runs 32 trials concurrently on Daytona sandboxes instead of your local Dock
 ## Next steps
 
 - Learn how each piece fits together in [Core Concepts](/core-concepts).
-- Define your own evaluation tasks in [Tasks](/tasks/overview).
+- Define your own evaluation tasks in [Tasks](/tasks/overview). Use `harbor init --task <org/name>` to scaffold a new task from a template.
 - Explore the full agent catalogue in [Agents](/agents/overview).

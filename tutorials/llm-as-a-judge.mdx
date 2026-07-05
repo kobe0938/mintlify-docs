@@ -1,7 +1,7 @@
 ---
-title: "Using LLM as a Judge in Harbor Tasks"
+title: "Use an LLM as a Judge to Score Harbor Agent Outputs"
 sidebarTitle: "LLM as a Judge"
-description: "Tutorial: configure an LLM judge verifier in a Harbor task using Reward Kit TOML files to grade agent outputs on subjective criteria like code quality."
+description: "Tutorial: build an LLM judge verifier in a Harbor task to score agent outputs on subjective criteria. Write named rewards to reward.json using any LLM API."
 ---
 
 Sometimes a pass/fail unit test cannot capture whether an agent produced a genuinely good result. This tutorial shows you how to replace a deterministic verifier with an LLM judge that scores the agent's output on subjective criteria and writes a numeric reward to `reward.json`. The full source for this example lives in [`examples/tasks/llm-judge-example`](https://github.com/laude-institute/harbor/tree/main/examples/tasks/llm-judge-example).

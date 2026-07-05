@@ -1,7 +1,7 @@
 ---
-title: "Multi-Step Tasks in Harbor"
+title: "Multi-Step Harbor Tasks: Sequential Steps and Rewards"
 sidebarTitle: "Multi-Step"
-description: "Define Harbor tasks with multiple sequential steps, each with its own instruction, tests, and verifier environment. Use multi_step_reward_strategy to aggregate scores."
+description: "Split a Harbor task into sequential steps with per-step instructions, tests, and verifier environments. Aggregate rewards with multi_step_reward_strategy."
 ---
 
 A multi-step task runs an agent through a sequence of ordered steps against a single shared environment. Each step has its own instruction, test script, and optional setup hook. Steps run sequentially, share the container filesystem, and produce individual verifier results that roll up into a single trial-level reward.
@@ -103,6 +103,14 @@ timeout_sec = 30.0
 | `verifier.environment` | `EnvironmentConfig \| null` | `null` | Dedicated verifier container for this step |
 | `min_reward` | `float \| dict[str, float] \| null` | `null` | Abort the trial if this step's reward falls below the threshold |
 | `artifacts` | `list[str \| ArtifactConfig]` | `[]` | Paths to snapshot after this step's verification |
+| `healthcheck.command` | `string` | — | Shell command to run after `setup.sh` and before the agent; exit `0` means healthy |
+| `healthcheck.interval_sec` | `float` | `5.0` | Seconds between healthcheck attempts |
+| `healthcheck.timeout_sec` | `float` | `30.0` | Maximum seconds for a single healthcheck command |
+| `healthcheck.start_period_sec` | `float` | `0.0` | Grace period after step setup during which failures do not count |
+| `healthcheck.start_interval_sec` | `float` | `5.0` | Interval between checks during the start period |
+| `healthcheck.retries` | `integer` | `3` | Consecutive failures before the step is aborted |
+
+The per-step healthcheck runs after `workdir/setup.sh` completes and before the agent starts for that step. A failure aborts the step and the entire trial.
 
 ## The workdir/ directory
 

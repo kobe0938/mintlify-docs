@@ -1,7 +1,7 @@
 ---
 title: "Generating SFT Datasets from Harbor Agent Trajectories"
 sidebarTitle: "SFT Export"
-description: "Export successful Harbor agent trials as conversational traces for supervised fine-tuning. Push datasets directly to Hugging Face Hub with a single CLI command."
+description: "Export Harbor agent trials as conversational traces for supervised fine-tuning. Filter by outcome, add ShareGPT columns, and push to Hugging Face Hub."
 ---
 
 Harbor includes utilities for turning agent trials into conversational traces you can feed into supervised fine-tuning pipelines. Export helpers live under `harbor.utils.traces_utils` and power several CLI entry points — from one-off exports to automatic post-run publishing.

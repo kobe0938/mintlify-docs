@@ -1,7 +1,7 @@
 ---
-title: "Building a Harbor Task with an MCP Server"
+title: "Build a Harbor Evaluation Task with an MCP Server"
 sidebarTitle: "MCP Server Task"
-description: "Tutorial: create a Harbor task that exposes an MCP server to the agent using environment.mcp_servers in task.toml — for tool-use evaluation scenarios."
+description: "Tutorial: create a Harbor task that runs an MCP server as a Docker Compose sidecar. Declare it in task.toml so compatible agents register it automatically."
 ---
 
 Multi-container tasks let you simulate external services alongside the agent — databases, APIs, and [MCP](https://modelcontextprotocol.io/) servers. This tutorial walks you through building a task where the agent must connect to an MCP server running as a sidecar, call a tool, and write the result to a file. The full source lives in [`examples/tasks/hello-mcp`](https://github.com/laude-institute/harbor/tree/main/examples/tasks/hello-mcp).

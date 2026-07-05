@@ -107,19 +107,27 @@ harbor task visibility "<org>/<name>" --public
 
 Or visit [hub.harborframework.com](https://hub.harborframework.com/) and update visibility from your task's settings page.
 
-## Running a published task
+## Using a published task
 
-Anyone with access to a published task can run it using its registry identifier — no local copy needed:
-
-```bash
-harbor run -p "<org>/<name>" -a "<agent>" -m "<model>"
-```
-
-For a specific tagged version:
+Anyone with access to a published task can use it by its registry identifier — no local copy required. To download a task to your current directory:
 
 ```bash
-harbor run -p "<org>/<name>:v1.0" -a "<agent>" -m "<model>"
+harbor download "<org>/<name>@latest"
 ```
+
+To download a specific tagged version:
+
+```bash
+harbor download "<org>/<name>@v1.0"
+```
+
+To run a single published task directly:
+
+```bash
+harbor run -t "<org>/<name>" -a "<agent>" -m "<model>"
+```
+
+You can also browse available tasks at [hub.harborframework.com/tasks](https://hub.harborframework.com/tasks).
 
 ## What harbor publish does
 

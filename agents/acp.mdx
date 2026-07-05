@@ -1,7 +1,7 @@
 ---
-title: "Agent Communication Protocol (ACP) in Harbor"
+title: "Running ACP Registry Agents in Harbor Evaluations"
 sidebarTitle: "ACP"
-description: "The Agent Communication Protocol lets Harbor agents communicate with external services and tools over a standardized HTTP-based interface during task execution."
+description: "Harbor's ACP runner lets you reference any agent from the Agent Client Protocol registry by ID and version, with no custom integration code required."
 ---
 
 Harbor includes a built-in runner for agents published in the [Agent Client Protocol (ACP) registry](https://github.com/agentclientprotocol/registry). Instead of writing a custom integration, you reference an agent by its registry ID and optional version, and Harbor fetches the agent definition, installs it into the container, and runs it — all automatically. This gives you immediate access to a growing ecosystem of community-published agents without any bespoke glue code.
@@ -96,17 +96,6 @@ Because Harbor generates `trajectory.json` in standard [ATIF format](/agents/tra
 ```bash
 harbor traces export -p jobs/<job-name> --recursive
 ```
-
-## When to Use ACP vs. a Custom Agent
-
-<CardGroup cols={2}>
-  <Card title="Use ACP when…" icon="check">
-    The agent you need is already published in the ACP registry. You get a working integration immediately with no code to write.
-  </Card>
-  <Card title="Write a custom agent when…" icon="wrench">
-    Your agent is private, requires non-standard installation steps, or needs tight integration with Harbor's context and verifier APIs.
-  </Card>
-</CardGroup>
 
 ## Related Documentation
 

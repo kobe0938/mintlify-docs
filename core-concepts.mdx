@@ -1,7 +1,7 @@
 ---
 title: "Harbor Core Concepts: Tasks, Datasets, Jobs & Agents"
 sidebarTitle: "Core Concepts"
-description: "Learn the fundamental building blocks of Harbor: tasks, datasets, agents, environments, trials, and jobs — and how they fit together in an evaluation run."
+description: "Learn the fundamental building blocks of Harbor: tasks, datasets, agents, environments, trials, and jobs — and how they fit together in an eval run."
 ---
 
 Before you dive into running evaluations or building custom tasks, it helps to understand the six building blocks that make up every Harbor workflow. This page defines each concept, explains how it relates to the others, and points you toward the relevant documentation for going deeper.
@@ -36,9 +36,11 @@ An agent is the program that receives a task instruction and attempts to complet
 |---|---|
 | Terminus-2 | `terminus-2` |
 | Claude Code | `claude-code` |
+| Copilot CLI | `copilot` |
 | Gemini CLI | `gemini` |
 | Codex CLI | `codex` |
 | OpenHands | `openhands` |
+| Mini-SWE-Agent | `mini-swe-agent` |
 
 If none of these fit your needs, you can implement a custom agent by subclassing `BaseAgent` or `BaseInstalledAgent`. Each task can also control which OS user the agent runs as by setting `agent.user` in `task.toml`, which is useful for privilege-separation scenarios.
 

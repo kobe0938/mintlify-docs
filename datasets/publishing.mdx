@@ -1,7 +1,7 @@
 ---
-title: "Publishing Datasets to the Harbor Registry"
+title: "Sharing and Publishing Datasets on Harbor Registry"
 sidebarTitle: "Publishing"
-description: "Publish Harbor datasets to the registry to share tasks with your organization or the public. Learn versioning, registry.json format, and dataset distribution."
+description: "Publish Harbor datasets to the registry to share tasks with your organization or the public. Learn versioning, registry.json format, and distribution."
 ---
 
 Publishing a dataset to the [Harbor registry](https://hub.harborframework.com/) makes it available to your entire organization or to the public — letting others run your benchmark with a single `harbor run -d` command. This guide walks you through every step from login to your first published run.
@@ -211,7 +211,7 @@ harbor run -d "my-org/my-dataset@v1.0" -a "<agent>" -m "<model>"
 Dataset versions are publish-time tags, not a field inside `dataset.toml`. Every publish automatically receives the `latest` tag so that `-d my-org/my-dataset` (with no `@`) always points at the newest release. Add explicit version tags with `-t`:
 
 ```bash
-harbor publish "<path/to/dataset>" -t v1.0 -t stable --public
+harbor publish "<path/to/dataset>" -t v1.0 --public
 ```
 
 Previously published tags remain pinned to their original snapshots, so pinned runs stay reproducible.

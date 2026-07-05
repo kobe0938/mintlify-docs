@@ -1,7 +1,7 @@
 ---
-title: "Harbor Changelog"
+title: "Harbor Changelog: Release Notes and Breaking Changes"
 sidebarTitle: "Changelog"
-description: "Release notes and updates for Harbor — track new features, improvements, and bug fixes across versions of the framework."
+description: "Release notes and breaking API changes for Harbor. Track new features, behavioral changes, and migration steps across every version of the framework."
 ---
 
 This page tracks every notable change to Harbor, including new features, behavioral changes, and breaking API updates. Entries marked **Unreleased** are merged to main but not yet part of a numbered release.
@@ -75,6 +75,14 @@ Both commands inherit `harbor run`'s flags:
 - `--job-name`, `-o/--jobs-dir`, `-q/--quiet` — standard job output controls.
 
 `harbor check` also batch-filters tasks (`-i/--include-task-name`, `-x/--exclude-task-name`, `-l/--n-tasks`); `harbor analyze` filters trials (`--passing`, `--failing`, `-l/--n-trials`).
+
+Both commands need the model API key and the environment API key exported in the same terminal where you run them:
+
+```bash
+export ANTHROPIC_API_KEY=...
+export DAYTONA_API_KEY=...
+harbor check examples/tasks/hello-world -e daytona
+```
 </Update>
 
 <Update label="Unreleased" description="Sidecar Artifacts and Collect Hooks">
@@ -88,7 +96,7 @@ service = "api"
 command = "curl -s localhost:8000/stats > /tmp/stats.json"
 ```
 
-Supported on every compose-capable provider (docker, daytona, modal, islo, gke, novita, langsmith).
+Supported on every compose-capable provider (docker, daytona, modal, islo, gke, novita, langsmith). Tasks declaring sidecar artifacts or collect hooks on providers without compose support fail at trial start.
 
 ### Breaking changes
 
@@ -99,6 +107,14 @@ Supported on every compose-capable provider (docker, daytona, modal, islo, gke, 
 **Artifact path validation tightened.** `destination` values must be relative paths without `..` components or backslashes, and may not shadow `manifest.json`. Absolute destinations and `source` values containing `..` are rejected.
 
 **Artifact collision validation added.** Equal or nested sources or destinations now emit a load-time warning; at collection time the first claimant is kept and the rest are skipped and recorded in `manifest.json`.
+
+### Other changes
+
+- `BaseEnvironment` gains per-service operations: `service_exec`, `service_download_file`, `service_download_dir`, `service_download_dir_with_exclusions`, `service_is_dir`, and `stop_service`. Compose-capable providers (docker, daytona, modal, islo, gke, novita, langsmith) implement them; others raise `ServiceOperationsUnsupportedError` for non-main services.
+- In separate verifier mode, the main service is stopped before sidecar evidence is collected, so leftover agent processes cannot interfere with collection.
+- Sidecar `service_exec` (and collect hooks) wrap commands with POSIX `sh -c` instead of `bash -c`, so they run on minimal sidecar images that ship only `sh`. The `main` container still uses `bash`.
+- Verifier-bound artifact uploads now create parent directories in the verifier container; verifier images no longer need `RUN mkdir -p` for every declared artifact path.
+- New example task: `examples/tasks/sidecar-artifacts`.
 </Update>
 
 <Update label="2026-06-20" description="Unified Agent, Environment, and Verifier Flags">
@@ -106,22 +122,27 @@ Supported on every compose-capable provider (docker, daytona, modal, islo, gke, 
 </Update>
 
 <Update label="2026-05-30" description="Phase-Scoped Network Policy">
-Network policy is now scoped to trial phases: `[environment]` (and `[verifier.environment]`) set baselines at env start; optional `[agent]` / `[verifier]` overrides apply only during `agent.run()` / `verify()`.
+Network policy is now scoped to trial phases: `[environment]` (and `[verifier.environment]`) set baselines at env start; optional `[agent]` / `[verifier]` overrides apply only during `agent.run()` / `verify()`. Unsupported policies fail at trial init. Shared-verifier tasks with a verifier phase policy that differs from the agent baseline require `dynamic_network_policy` or `verifier.environment_mode = "separate"`. Run-time host merges use `--allow-environment-host` and `--allow-agent-host` (`environment.extra_allowed_hosts` / `agent.extra_allowed_hosts` on `TrialConfig`).
 
 - New tasks default to schema version `1.3`. Schema `1.2` tasks still load.
 - Legacy `[environment].allow_internet` is still accepted and mapped to `[environment].network_mode`.
 - E2B supports runtime network switches via `update_network()`; allowlist enforcement also on ISLO.
-- Run-time host merges use `--allow-environment-host` and `--allow-agent-host`.
 </Update>
 
 <Update label="2026-05-21" description="Resource Enforcement Policies">
-Jobs and trials can now set `cpu_enforcement_policy` and `memory_enforcement_policy` (`auto`, `limit`, `request`, `guarantee`, `ignore`) to control how task `cpus` / `memory_mb` are applied per provider.
+Jobs and trials can set `cpu_enforcement_policy` and `memory_enforcement_policy` (`auto`, `limit`, `request`, `guarantee`, `ignore`) to control how task `cpus` / `memory_mb` are applied per provider. Harbor validates provider support at job start and required task values at environment construction.
 
 ### Breaking changes
 
 **Task `[environment]` resource defaults removed.** `cpus`, `memory_mb`, `storage_mb`, and `gpus` in `task.toml` no longer default to `1`, `2048`, `10240`, and `0` when omitted. Omitted fields are `None` and Harbor applies provider defaults instead of injecting Harbor-side limits.
 
 **Stricter resource enforcement validation.** Jobs fail at `Job.create` when `cpu_enforcement_policy` or `memory_enforcement_policy` is incompatible with the selected environment type. Trials fail at environment construction when a non-`ignore` policy requires `cpus` or `memory_mb` but the task omits them.
+
+### Other changes
+
+- `harbor run --cpus` and `--memory` set enforcement policies (`auto`, `limit`, `request`, `guarantee`, `ignore`); use `--override-cpus` and `--override-memory-mb` for numeric overrides.
+- Split `EnvironmentCapabilities` (feature flags) from `EnvironmentResourceCapabilities` (CPU/memory limit vs request support); each provider declares the latter via `resource_capabilities()`.
+- Docker, Modal, GKE, and cloud sandboxes advertise distinct resource enforcement behavior; unsupported policy/mode pairs fail before trials start.
 </Update>
 
 <Update label="2026-05-14" description="Separate Verifier Environments">
@@ -130,6 +151,15 @@ Tasks can now run verifiers in a dedicated environment with `[verifier].environm
 ### Breaking change
 
 **`BaseEnvironment.env_paths` removed.** Use `EnvironmentPaths.for_os(env.os)` instead. `BaseEnvironment.task_os` remains as a deprecated alias for `BaseEnvironment.os`.
+
+### Other changes
+
+- `[verifier.environment]` implies separate mode; `environment_mode = "shared"` with `[verifier.environment]` is invalid.
+- Docker Compose runtime mounts now come from a generated `docker-compose-mounts.json` override. Legacy `HOST_VERIFIER_LOGS_PATH`, `HOST_AGENT_LOGS_PATH`, `HOST_ARTIFACTS_PATH`, and matching `ENV_*` variables remain available as deprecated compatibility aliases.
+- Separate verifier environments receive `/logs/artifacts` plus configured task, trial, and step artifacts, but not agent logs unless explicitly listed as artifacts.
+- Separate verifier images are built from `tests/` or `steps/<name>/tests/` and must provide `/tests/test.sh` or `/tests/test.bat` themselves.
+- Task validation now checks test scripts against the effective verifier OS, including per-step verifier environments.
+- `--mounts` replaces `--mounts-json`; the old flag and `EnvironmentConfig.mounts_json` remain as deprecated aliases.
 </Update>
 
 <Update label="2026-05-06" description="Runtime, Upload, and Sandbox Fixes">
@@ -144,6 +174,7 @@ Tasks can now run verifiers in a dedicated environment with `[verifier].environm
 - LangSmith sandboxes are now available as a cloud environment via `harbor[langsmith]` and `--env langsmith`.
 - `opencode` now accepts arbitrary providers through `-m`, and `kimi-cli` supports OpenRouter.
 - `cursor-cli` trajectory conversion now recognizes Cursor's `interaction_query` stream events and skips them without dropping the trajectory.
+- `cursor-cli` now skips unsupported future Cursor stream event types at debug level instead of aborting trajectory conversion for the entire run.
 - Tensorlake is now documented as a sandbox provider, and snapshot restores skip redundant baseline setup.
 - Registry, Hub, and Supabase endpoints can now be overridden with environment variables for non-production deployments.
 </Update>
@@ -281,6 +312,28 @@ client = RegistryClientFactory.create(registry_url="https://...")
 ```
 
 **`TaskConfig.path` is now optional.** New `name: str | None` and `ref: str | None` fields support package-based tasks. A model validator enforces that exactly one of `path` or `name` is set.
+
+**`BaseRegistryClient` API changes:**
+
+| Old | New |
+|-----|-----|
+| `get_datasets()` | `async list_datasets()` (returns `list[DatasetSummary]`) |
+| `get_dataset_spec(name, version)` | `async get_dataset_metadata(name)` (version embedded in name string, e.g. `"dataset@2.0"`) |
+| `_get_dataset_spec(name, version)` (abstract) | `async _get_dataset_metadata(name)` (abstract, returns `DatasetMetadata`) |
+| `download_dataset(...)` | `async download_dataset(...)` |
+
+**`TaskClient.download_tasks()` is now async with changed return type:**
+
+```python
+# Before (sync, returns list[Path])
+paths = client.download_tasks(task_ids=[...])
+
+# After (async, returns BatchDownloadResult)
+result = await client.download_tasks(task_ids=[...])
+paths = result.paths
+```
+
+Also accepts the new `PackageTaskId` type in `task_ids`.
 </Update>
 
 <Update label="2026-03-24" description="Configurable Agent User & Agent Architecture Rework">
@@ -316,7 +369,9 @@ class MyAgent(BaseInstalledAgent):
 
 **Jinja2 install templates removed.** All `install-*.sh.j2` files have been deleted. Switch to the `install()` method pattern.
 
-**`BaseEnvironment.exec()` now accepts a `user` parameter.** Custom environments that override `exec()` must add `user: str | int | None = None` and handle it appropriately.
+**`BaseEnvironment.exec()` now accepts a `user` parameter.** Custom environments that override `exec()` must add `user: str | int | None = None` and handle it appropriately. The `is_dir()` and `is_file()` methods also now accept an optional `user` parameter.
+
+**`BaseEnvironment.default_user` attribute.** All environments now have a `default_user: str | int | None` attribute (initialized to `None`). The trial orchestrator sets this before calling `agent.setup()` and `agent.run()`, and resets it for verification. Custom environment implementations should call `self._resolve_user(user)` in their `exec()` method to respect this fallback.
 
 ### New features
 
@@ -333,4 +388,15 @@ user = "root"    # run the verifier as this OS user
 ```
 
 **`with_prompt_template` decorator:** automatically renders the instruction through the configured prompt template in agent `run()` methods.
+
+```python
+from harbor.agents.installed.base import with_prompt_template
+
+@with_prompt_template
+async def run(self, instruction, environment, context):
+    # instruction is already rendered
+    ...
+```
+
+**`hello-user` example task:** a new example at `examples/tasks/hello-user/` demonstrates the configurable user feature. It creates an `agent` user in the Dockerfile and sets `agent.user = "agent"` in `task.toml`.
 </Update>

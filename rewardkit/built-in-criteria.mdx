@@ -1,5 +1,5 @@
 ---
-title: "Reward Kit Built-In Criteria Reference"
+title: "Reward Kit Built-In Criteria: 20+ Grading Functions"
 sidebarTitle: "Built-In Criteria"
 description: "Reward Kit provides 20+ built-in criteria for grading files, commands, JSON, CSV, HTTP endpoints, images, and agent trajectories. No custom code required."
 ---
@@ -144,7 +144,7 @@ Trajectory criteria inspect the agent's [ATIF](https://github.com/harbor-framewo
 | Criterion | Parameters | Description |
 |---|---|---|
 | `trajectory_tool_used` | `tool_name, min_count?, path?` | Agent used a specific tool at least `min_count` times (default 1) |
-| `trajectory_tool_not_used` | `NN tool_name, path?` | Agent did not use a specific tool |
+| `trajectory_tool_not_used` | `tool_name, path?` | Agent did not use a specific tool |
 | `trajectory_turn_count` | `max_turns, path?` | Penalizes exceeding a turn budget — returns `1.0` at `max_turns`, linearly decays to `0.0` at double |
 
 ```python title="tests/check.py"

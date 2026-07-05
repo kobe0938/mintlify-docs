@@ -17,10 +17,10 @@ jobs/job-name
 ├── trial-name
 │   ├── config.json           # Trial configuration snapshot
 │   ├── result.json           # Trial result
-│   ├── agent/                # Agent output (contents vary by agent implementation)
+│   ├── agent                 # Agent output (contents vary by agent implementation)
 │   │   ├── recording.cast
 │   │   └── trajectory.json
-│   └── verifier/             # Verifier output (contents vary by test.sh implementation)
+│   └── verifier              # Verifier output (contents vary by test.sh implementation)
 │       ├── ctrf.json
 │       ├── reward.txt
 │       ├── test-stderr.txt
@@ -42,7 +42,7 @@ The verifier writes its reward signal to the `verifier/` directory after each tr
 
 ## Artifact collection
 
-In addition to the standard result files, Harbor can collect arbitrary files from inside the sandbox after each trial. Any files written to `/logs/verifier/` or `/logs/agent/` inside the sandbox are automatically downloaded to the corresponding `verifier/` or `agent/` subdirectory on the host — no configuration required.
+In addition to the standard result files, Harbor can collect arbitrary files from inside the sandbox after each trial. Any files written to `/logs/artifacts/` inside the sandbox are automatically downloaded to the `artifacts/` subdirectory in the trial directory on the host — no configuration required.
 
 For more advanced collection scenarios — pulling files from arbitrary paths, collecting from Docker Compose sidecar services, or customizing where files land on the host — you can declare an `artifacts` block in your `job.yaml`:
 

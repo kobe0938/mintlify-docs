@@ -1,5 +1,5 @@
 ---
-title: "Custom Dataset Metrics in Harbor"
+title: "Writing Custom Dataset Metrics for Harbor Evaluations"
 sidebarTitle: "Metrics"
 description: "Define custom aggregate metrics for your Harbor datasets to summarize evaluation performance beyond the default reward average across tasks."
 ---
@@ -16,19 +16,13 @@ The default average reward is sufficient for most evaluations. Consider writing 
 
 ## Add a metric script to your dataset
 
-If you are working with a `dataset.toml`, generate a `metric.py` stub and wire it into your manifest in one step:
-
-```bash
-harbor dataset init "<org>/<name>" --with-metric
-```
-
-Or, if your dataset already exists, add the flag when re-initializing:
+If you are working with a `dataset.toml`, run the following command to create a `metric.py` file and automatically add it to the `[[files]]` section of your `dataset.toml`:
 
 ```bash
 harbor init --dataset "<org>/<name>" --with-metric
 ```
 
-This creates `metric.py` in the dataset directory and adds it to the `[[files]]` section of `dataset.toml`. For local datasets, Harbor picks up `metric.py` automatically without any manifest changes.
+For local datasets, Harbor picks up `metric.py` automatically without any manifest changes.
 
 ## How Harbor invokes `metric.py`
 
